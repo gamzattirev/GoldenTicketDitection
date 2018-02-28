@@ -14,7 +14,7 @@ import java.util.*;
  * @version 1.0
  * @author Mariko Fujimoto
  */
-public class GoldenDetecter {
+public class AuthLogParser {
 
 	/**
 	 * Specify file name of mimikatz
@@ -32,9 +32,11 @@ public class GoldenDetecter {
 			String date = "";
 			HashSet<EventLogData> evSet = null;
 			String accountName = "";
-
+			String clientAddress = "";
+			String serviceName = "";
 			while ((line = br.readLine()) != null) {
-				String clientAddress = "";
+				int clientPort=0;
+				line=line.replaceAll("\\t", "");
 				String[] data = line.split(",", 0);
 				for (String elem : data) {
 					if (line.contains("Microsoft-Windows-Security-Auditing,4769")
@@ -42,7 +44,7 @@ public class GoldenDetecter {
 						date = data[1];
 						eventID = Integer.parseInt(data[3]);
 					} else if (elem.contains("アカウント名:")) {
-						accountName = parseElement(elem, ":\t");
+						accountName = parseElement(elem, ":");
 						if (accountName.isEmpty()) {
 							continue;
 						} else {
@@ -53,14 +55,17 @@ public class GoldenDetecter {
 						} else {
 							evSet = log.get(accountName);
 						}
+					} else if (elem.contains("サービス名:")) {
+						serviceName = parseElement(elem, ":");
 					} else if (elem.contains("クライアント アドレス:")) {
-						clientAddress = parseElement(elem, ":\t");
-					}
-					if (!clientAddress.isEmpty()) {
-						evSet.add(new EventLogData(date, clientAddress, accountName, eventID));
+						elem=elem.replaceAll("::ffff:", "");
+						clientAddress = parseElement(elem, ":");
+					} else if (elem.contains("クライアント ポート:") && 0 !=eventID) {
+						clientPort = Integer.parseInt(parseElement(elem, ":"));
+						evSet.add(new EventLogData(date, clientAddress, accountName, eventID, clientPort, serviceName));
 						log.put(accountName, evSet);
+						eventID = 0;
 					}
-
 				}
 			}
 			br.close();
@@ -144,8 +149,8 @@ public class GoldenDetecter {
 					isGolden = true;
 				}
 				for (EventLogData ev : evS) {
-					pw.println(ev.getEventID() + ", " + ev.getAccountName() + "," + ev.getClientAddress() + ", "
-							+ ev.getDate() + ", " + isGolden);
+					pw.println(ev.getEventID() + ", " + ev.getDate() + ", "+ ev.getAccountName() + "," + ev.getClientAddress() + ", "
+							+ev.getClientPort()+ ", " +ev.getServiceName() + ", " + isGolden);
 				}
 			}
 		} catch (IOException e) {
@@ -201,7 +206,7 @@ public class GoldenDetecter {
 	}
 
 	public static void main(String args[]) {
-		GoldenDetecter sysmonParser = new GoldenDetecter();
+		AuthLogParser sysmonParser = new AuthLogParser();
 		String inputdirname = "";
 		if (args.length < 2) {
 			printUseage();

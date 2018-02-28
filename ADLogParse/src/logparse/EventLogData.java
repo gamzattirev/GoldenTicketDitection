@@ -6,12 +6,16 @@ public class EventLogData {
 	private String accountName="";
 	private String clientAddress="";
 	private int eventID;
+	int clientPort;
+	String serviceName = "";
 	
-	EventLogData(String date, String clientAddress, String accountName, int eventID){
+	EventLogData(String date, String clientAddress, String accountName, int eventID, int clientPort, String serviceName){
 		this.date=date;
 		this.accountName=accountName;
 		this.clientAddress=clientAddress;
 		this.eventID=eventID;
+		this.clientPort=clientPort;
+		this.serviceName=serviceName;
 	}
 	
 	public void setDate(String date){
@@ -34,6 +38,12 @@ public class EventLogData {
 	}
 	public int getEventID(){
 		return this.eventID;
+	}
+	public int getClientPort(){
+		return this.clientPort;
+	}
+	public String getServiceName(){
+		return this.serviceName;
 	}
 
 }
