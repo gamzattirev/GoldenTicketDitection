@@ -22,6 +22,7 @@ public class AuthLogParser {
 	private static Map<String, HashSet> log;
 	private static String outputDirName = null;
 	private static List<String> SUSPICIOUS_CMD = null;
+	private Set<String> accounts=new HashSet<String>();
 	
 	static{
 		SUSPICIOUS_CMD=new ArrayList<String>();
@@ -52,7 +53,8 @@ public class AuthLogParser {
 				for (String elem : data) {
 					if (line.contains("Microsoft-Windows-Security-Auditing,4769")
 							|| line.contains("Microsoft-Windows-Security-Auditing,4768")
-							|| line.contains("Microsoft-Windows-Security-Auditing,4674")) {
+							|| line.contains("Microsoft-Windows-Security-Auditing,4674")
+							|| line.contains("Microsoft-Windows-Security-Auditing,4672")) {
 						date = data[1];
 						eventID = Integer.parseInt(data[3]);
 					} else if (elem.contains("アカウント名:")||elem.contains("Account Name:")) {
@@ -61,6 +63,13 @@ public class AuthLogParser {
 							continue;
 						} else {
 							accountName = accountName.split("@")[0].toLowerCase();
+							if(4672==eventID){
+								evSet.add(new EventLogData(date, "", accountName, eventID, 0, "",""));
+								log.put(accountName, evSet);
+								eventID = -1;
+								accounts.add(accountName);
+								continue;
+							}
 						}
 						if (null == log.get(accountName)) {
 							evSet = new HashSet<EventLogData>();
@@ -116,7 +125,7 @@ public class AuthLogParser {
 		for (Iterator it = map.entrySet().iterator(); it.hasNext();) {
 			Map.Entry<String, HashSet> entry = (Map.Entry<String, HashSet>) it.next();
 			String accountName = (String) entry.getKey();
-			if (accountName.isEmpty() || accountName.endsWith("$")) {
+			if (!accounts.contains(accountName)) {
 				continue;
 			}
 			HashSet<EventLogData> evS = (HashSet<EventLogData>) entry.getValue();
