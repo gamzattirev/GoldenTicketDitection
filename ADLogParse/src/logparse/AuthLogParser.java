@@ -91,6 +91,7 @@ public class AuthLogParser {
 
 					} else if (elem.contains("アカウント名:") || elem.contains("Account Name:")) {
 						accountName = parseElement(elem, ":", limit);
+						
 						if (accountName.isEmpty()) {
 							continue;
 						} else {
@@ -113,6 +114,7 @@ public class AuthLogParser {
 					} else if (elem.contains("クライアント アドレス:") || elem.contains("Client Address:")) {
 						elem = elem.replaceAll("::ffff:", "");
 						clientAddress = parseElement(elem, ":", limit);
+						
 					} else if ((elem.contains("クライアント ポート:") || elem.contains("Client Port:")) && 0 <= eventID) {
 						clientPort = Integer.parseInt(parseElement(elem, ":", limit));
 						evSet.add(new EventLogData(sdfOut.format(new Date(logDate.getTime())), clientAddress, accountName, eventID, clientPort, serviceName,
@@ -222,9 +224,10 @@ public class AuthLogParser {
 						isGolden = 1;
 					}
 				}
+				long timeCnt=(ev.getAccountName()+ev.getClientAddress()).hashCode()+ev.getTimeCnt();
 				pw.println(ev.getEventID() + ", " + ev.getDate() + ", " + ev.getAccountName() + ","
 						+ ev.getClientAddress() + ", " + ev.getClientPort() + ", " + ev.getServiceName() + ", "
-						+ ev.getProcessName() + ", " + isGolden + ", " + ev.getTimeCnt());
+						+ ev.getProcessName() + ", " + isGolden + ", " + timeCnt);
 			}
 		}
 
