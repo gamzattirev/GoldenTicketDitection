@@ -21,6 +21,15 @@ public class AuthLogParser {
 	 */
 	private static Map<String, HashSet> log;
 	private static String outputDirName = null;
+	private static List<String> SUSPICIOUS_CMD = null;
+	
+	static{
+		SUSPICIOUS_CMD=new ArrayList<String>();
+		SUSPICIOUS_CMD.add("dir");
+		SUSPICIOUS_CMD.add("hostname");
+		SUSPICIOUS_CMD.add("whoami");
+		SUSPICIOUS_CMD.add("net use");
+	}
 
 	private void readCSV(String filename) {
 
@@ -28,23 +37,26 @@ public class AuthLogParser {
 			File f = new File(filename);
 			BufferedReader br = new BufferedReader(new FileReader(f));
 			String line;
-			int eventID = 0;
+			int eventID = -1;
 			String date = "";
 			HashSet<EventLogData> evSet = null;
 			String accountName = "";
 			String clientAddress = "";
 			String serviceName = "";
+			String processName = "";
+			int limit=0;
 			while ((line = br.readLine()) != null) {
 				int clientPort=0;
 				line=line.replaceAll("\\t", "");
 				String[] data = line.split(",", 0);
 				for (String elem : data) {
 					if (line.contains("Microsoft-Windows-Security-Auditing,4769")
-							|| line.contains("Microsoft-Windows-Security-Auditing,4768")) {
+							|| line.contains("Microsoft-Windows-Security-Auditing,4768")
+							|| line.contains("Microsoft-Windows-Security-Auditing,4674")) {
 						date = data[1];
 						eventID = Integer.parseInt(data[3]);
-					} else if (elem.contains("アカウント名:")) {
-						accountName = parseElement(elem, ":");
+					} else if (elem.contains("アカウント名:")||elem.contains("Account Name:")) {
+						accountName = parseElement(elem, ":",limit);
 						if (accountName.isEmpty()) {
 							continue;
 						} else {
@@ -55,17 +67,24 @@ public class AuthLogParser {
 						} else {
 							evSet = log.get(accountName);
 						}
-					} else if (elem.contains("サービス名:")) {
-						serviceName = parseElement(elem, ":");
-					} else if (elem.contains("クライアント アドレス:")) {
+					} else if (elem.contains("サービス名:")||elem.contains("Service Name:")) {
+						serviceName = parseElement(elem, ":",limit);
+					} else if (elem.contains("クライアント アドレス:")||elem.contains("Client Address:")) {
 						elem=elem.replaceAll("::ffff:", "");
-						clientAddress = parseElement(elem, ":");
-					} else if (elem.contains("クライアント ポート:") && 0 !=eventID) {
-						clientPort = Integer.parseInt(parseElement(elem, ":"));
-						evSet.add(new EventLogData(date, clientAddress, accountName, eventID, clientPort, serviceName));
+						clientAddress = parseElement(elem, ":",limit);
+					} else if ((elem.contains("クライアント ポート:") ||elem.contains("Client Port:"))&& 0 <=eventID) {
+						clientPort = Integer.parseInt(parseElement(elem, ":",limit));
+						evSet.add(new EventLogData(date, clientAddress, accountName, eventID, clientPort, serviceName,processName));
 						log.put(accountName, evSet);
-						eventID = 0;
-					}
+						eventID = -1;
+						serviceName="";
+					} else if ((elem.contains("プロセス名:")||elem.contains("Process Name:")) && 0 <=eventID) {
+						processName = parseElement(elem, ":",2).toLowerCase();
+						evSet.add(new EventLogData(date, clientAddress, accountName, eventID, clientPort, serviceName,processName));
+						log.put(accountName, evSet);
+						eventID = -1;
+						processName = "";
+					} 
 				}
 			}
 			br.close();
@@ -76,10 +95,10 @@ public class AuthLogParser {
 
 	}
 
-	private String parseElement(String elem, String delimiter) {
+	private String parseElement(String elem, String delimiter, int limit) {
 		String value = "";
 		try {
-			String elems[] = elem.trim().split(delimiter);
+			String elems[] = elem.trim().split(delimiter,limit);
 			if (elems.length >= 2) {
 				value = elems[1];
 				value = value.replaceAll("\t", "");
@@ -147,10 +166,15 @@ public class AuthLogParser {
 				}
 				if (!isTGTEvent && isSTEvent) {
 					isGolden = true;
-				}
+				} 
 				for (EventLogData ev : evS) {
+					for (String cmd : SUSPICIOUS_CMD){
+						if (ev.getProcessName().contains(cmd)){
+							isGolden = true;
+						}
+					}
 					pw.println(ev.getEventID() + ", " + ev.getDate() + ", "+ ev.getAccountName() + "," + ev.getClientAddress() + ", "
-							+ev.getClientPort()+ ", " +ev.getServiceName() + ", " + isGolden);
+							+ev.getClientPort()+ ", " +ev.getServiceName() + ", " +ev.getProcessName() + ", " + isGolden);
 				}
 			}
 		} catch (IOException e) {
