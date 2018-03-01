@@ -5,6 +5,7 @@ import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.text.*;
 import java.util.*;
 
 /**
@@ -22,10 +23,15 @@ public class AuthLogParser {
 	private static Map<String, HashSet> log;
 	private static String outputDirName = null;
 	private static List<String> SUSPICIOUS_CMD = null;
-	private Set<String> accounts=new HashSet<String>();
-	
-	static{
-		SUSPICIOUS_CMD=new ArrayList<String>();
+	private static short TIME_CNT = Short.MAX_VALUE;
+	private Set<String> accounts = new HashSet<String>();
+	private File file = null;
+	private FileWriter filewriter = null;
+	private BufferedWriter bw = null;
+	private PrintWriter pw = null;
+
+	static {
+		SUSPICIOUS_CMD = new ArrayList<String>();
 		SUSPICIOUS_CMD.add("dir");
 		SUSPICIOUS_CMD.add("hostname");
 		SUSPICIOUS_CMD.add("whoami");
@@ -45,10 +51,14 @@ public class AuthLogParser {
 			String clientAddress = "";
 			String serviceName = "";
 			String processName = "";
-			int limit=0;
+			int limit = 0;
+			Date baseDate = null;
+			Date logDate = null;
+			short timeCnt = TIME_CNT;
+			SimpleDateFormat sdf = new SimpleDateFormat("yyyy/MM/dd HH:mm:ss");
 			while ((line = br.readLine()) != null) {
-				int clientPort=0;
-				line=line.replaceAll("\\t", "");
+				int clientPort = 0;
+				line = line.replaceAll("\\t", "");
 				String[] data = line.split(",", 0);
 				for (String elem : data) {
 					if (line.contains("Microsoft-Windows-Security-Auditing,4769")
@@ -57,14 +67,34 @@ public class AuthLogParser {
 							|| line.contains("Microsoft-Windows-Security-Auditing,4672")) {
 						date = data[1];
 						eventID = Integer.parseInt(data[3]);
-					} else if (elem.contains("アカウント名:")||elem.contains("Account Name:")) {
-						accountName = parseElement(elem, ":",limit);
+						try {
+							if (4769 == eventID && null == baseDate) {
+								baseDate = sdf.parse(date);
+								timeCnt--;
+							} else if (null != baseDate) {
+								logDate = sdf.parse(date);
+								long logTime = logDate.getTime();
+								long baseTime = baseDate.getTime();
+								long timeDiff = (baseTime - logTime) / 1000;
+								System.out.println(baseDate.toString()+","+logDate.toString()+","+timeDiff);
+								if (timeDiff > 1) {
+									timeCnt--;
+									baseDate = sdf.parse(date);
+								}
+							}
+
+						} catch (ParseException e) {
+							e.printStackTrace();
+						}
+
+					} else if (elem.contains("アカウント名:") || elem.contains("Account Name:")) {
+						accountName = parseElement(elem, ":", limit);
 						if (accountName.isEmpty()) {
 							continue;
 						} else {
 							accountName = accountName.split("@")[0].toLowerCase();
-							if(4672==eventID){
-								evSet.add(new EventLogData(date, "", accountName, eventID, 0, "",""));
+							if (4672 == eventID) {
+								evSet.add(new EventLogData(date, "", accountName, eventID, 0, "", "", timeCnt));
 								log.put(accountName, evSet);
 								eventID = -1;
 								accounts.add(accountName);
@@ -76,24 +106,26 @@ public class AuthLogParser {
 						} else {
 							evSet = log.get(accountName);
 						}
-					} else if (elem.contains("サービス名:")||elem.contains("Service Name:")) {
-						serviceName = parseElement(elem, ":",limit);
-					} else if (elem.contains("クライアント アドレス:")||elem.contains("Client Address:")) {
-						elem=elem.replaceAll("::ffff:", "");
-						clientAddress = parseElement(elem, ":",limit);
-					} else if ((elem.contains("クライアント ポート:") ||elem.contains("Client Port:"))&& 0 <=eventID) {
-						clientPort = Integer.parseInt(parseElement(elem, ":",limit));
-						evSet.add(new EventLogData(date, clientAddress, accountName, eventID, clientPort, serviceName,processName));
+					} else if (elem.contains("サービス名:") || elem.contains("Service Name:")) {
+						serviceName = parseElement(elem, ":", limit);
+					} else if (elem.contains("クライアント アドレス:") || elem.contains("Client Address:")) {
+						elem = elem.replaceAll("::ffff:", "");
+						clientAddress = parseElement(elem, ":", limit);
+					} else if ((elem.contains("クライアント ポート:") || elem.contains("Client Port:")) && 0 <= eventID) {
+						clientPort = Integer.parseInt(parseElement(elem, ":", limit));
+						evSet.add(new EventLogData(date, clientAddress, accountName, eventID, clientPort, serviceName,
+								processName, timeCnt));
 						log.put(accountName, evSet);
 						eventID = -1;
-						serviceName="";
-					} else if ((elem.contains("プロセス名:")||elem.contains("Process Name:")) && 0 <=eventID) {
-						processName = parseElement(elem, ":",2).toLowerCase();
-						evSet.add(new EventLogData(date, clientAddress, accountName, eventID, clientPort, serviceName,processName));
+						serviceName = "";
+					} else if ((elem.contains("プロセス名:") || elem.contains("Process Name:")) && 0 <= eventID) {
+						processName = parseElement(elem, ":", 2).toLowerCase();
+						evSet.add(new EventLogData(date, clientAddress, accountName, eventID, clientPort, serviceName,
+								processName, timeCnt));
 						log.put(accountName, evSet);
 						eventID = -1;
 						processName = "";
-					} 
+					}
 				}
 			}
 			br.close();
@@ -107,7 +139,7 @@ public class AuthLogParser {
 	private String parseElement(String elem, String delimiter, int limit) {
 		String value = "";
 		try {
-			String elems[] = elem.trim().split(delimiter,limit);
+			String elems[] = elem.trim().split(delimiter, limit);
 			if (elems.length >= 2) {
 				value = elems[1];
 				value = value.replaceAll("\t", "");
@@ -120,71 +152,35 @@ public class AuthLogParser {
 	}
 
 	private void outputResults(Map map, String outputFileName) {
-
-		//アカウントごとに調べる
-		for (Iterator it = map.entrySet().iterator(); it.hasNext();) {
-			Map.Entry<String, HashSet> entry = (Map.Entry<String, HashSet>) it.next();
-			String accountName = (String) entry.getKey();
-			if (!accounts.contains(accountName)) {
-				continue;
-			}
-			HashSet<EventLogData> evS = (HashSet<EventLogData>) entry.getValue();
-			HashSet<String> imageLoadedList = new HashSet<String>();
-			Map<String, HashSet> kerlog = new HashMap<String, HashSet>();
-
-			// クライアントアドレスごとにマップへ入れる
-			for (EventLogData ev : evS) {
-				HashSet<EventLogData> evSet;
-				if (null != kerlog.get(ev.getClientAddress())) {
-					evSet = kerlog.get(ev.getClientAddress());
-				} else {
-					evSet = new HashSet<EventLogData>();
-				}
-				evSet.add(ev);
-				kerlog.put(ev.getClientAddress(), evSet);
-			}
-			isGoldenUsed(kerlog, outputFileName);
-		}
-
-	}
-
-	private void isGoldenUsed(Map<String, HashSet> kerlog, String outputFileName) {
-		// 
-		File file = new File(outputFileName);
-		FileWriter filewriter = null;
-		BufferedWriter bw = null;
-		PrintWriter pw = null;
 		try {
-			filewriter = new FileWriter(file,true);
+			filewriter = new FileWriter(outputFileName, true);
 			bw = new BufferedWriter(filewriter);
 			pw = new PrintWriter(bw);
-			for (Iterator it = kerlog.entrySet().iterator(); it.hasNext();) {
-				// アカウント、端末ごとに4768/4769
-				boolean isTGTEvent = false;
-				boolean isSTEvent = false;
-				boolean isGolden = false;
+			pw.println("eventID,date,account,ip,port,service,process,target,timeCnt");
+
+			// アカウントごとに調べる
+			for (Iterator it = map.entrySet().iterator(); it.hasNext();) {
 				Map.Entry<String, HashSet> entry = (Map.Entry<String, HashSet>) it.next();
+				String accountName = (String) entry.getKey();
+				if (!accounts.contains(accountName)) {
+					continue;
+				}
 				HashSet<EventLogData> evS = (HashSet<EventLogData>) entry.getValue();
+				HashSet<String> imageLoadedList = new HashSet<String>();
+				Map<String, HashSet> kerlog = new HashMap<String, HashSet>();
+
+				// クライアントアドレスごとにマップへ入れる
 				for (EventLogData ev : evS) {
-					int eventID = ev.getEventID();
-					if (eventID == 4768) {
-						isTGTEvent = true;
-					} else if (eventID == 4769) {
-						isSTEvent = true;
+					HashSet<EventLogData> evSet;
+					if (null != kerlog.get(ev.getClientAddress())) {
+						evSet = kerlog.get(ev.getClientAddress());
+					} else {
+						evSet = new HashSet<EventLogData>();
 					}
+					evSet.add(ev);
+					kerlog.put(ev.getClientAddress(), evSet);
 				}
-				if (!isTGTEvent && isSTEvent) {
-					isGolden = true;
-				} 
-				for (EventLogData ev : evS) {
-					for (String cmd : SUSPICIOUS_CMD){
-						if (ev.getProcessName().contains(cmd)){
-							isGolden = true;
-						}
-					}
-					pw.println(ev.getEventID() + ", " + ev.getDate() + ", "+ ev.getAccountName() + "," + ev.getClientAddress() + ", "
-							+ev.getClientPort()+ ", " +ev.getServiceName() + ", " +ev.getProcessName() + ", " + isGolden);
-				}
+				isGoldenUsed(kerlog);
 			}
 		} catch (IOException e) {
 			e.printStackTrace();
@@ -194,6 +190,39 @@ public class AuthLogParser {
 				bw.close();
 			} catch (IOException e) {
 				e.printStackTrace();
+			}
+		}
+	}
+
+	private void isGoldenUsed(Map<String, HashSet> kerlog) {
+		//
+		for (Iterator it = kerlog.entrySet().iterator(); it.hasNext();) {
+			// アカウント、端末ごとに4768/4769
+			boolean isTGTEvent = false;
+			boolean isSTEvent = false;
+			boolean isGolden = false;
+			Map.Entry<String, HashSet> entry = (Map.Entry<String, HashSet>) it.next();
+			HashSet<EventLogData> evS = (HashSet<EventLogData>) entry.getValue();
+			for (EventLogData ev : evS) {
+				int eventID = ev.getEventID();
+				if (eventID == 4768) {
+					isTGTEvent = true;
+				} else if (eventID == 4769) {
+					isSTEvent = true;
+				}
+			}
+			if (!isTGTEvent && isSTEvent) {
+				isGolden = true;
+			}
+			for (EventLogData ev : evS) {
+				for (String cmd : SUSPICIOUS_CMD) {
+					if (ev.getProcessName().contains(cmd)) {
+						isGolden = true;
+					}
+				}
+				pw.println(ev.getEventID() + ", " + ev.getDate() + ", " + ev.getAccountName() + ","
+						+ ev.getClientAddress() + ", " + ev.getClientPort() + ", " + ev.getServiceName() + ", "
+						+ ev.getProcessName() + ", " + isGolden + ", " + ev.getTimeCnt());
 			}
 		}
 
@@ -216,7 +245,9 @@ public class AuthLogParser {
 			} else {
 				continue;
 			}
+
 			outputResults(log, this.outputDirName + "/" + "result.csv");
+
 		}
 
 	}
