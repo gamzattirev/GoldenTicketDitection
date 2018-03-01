@@ -55,7 +55,8 @@ public class AuthLogParser {
 			Date baseDate = null;
 			Date logDate = null;
 			short timeCnt = TIME_CNT;
-			SimpleDateFormat sdf = new SimpleDateFormat("yyyy/MM/dd HH:mm:ss");
+			SimpleDateFormat sdf = new SimpleDateFormat("MM/dd/yyyy hh:mm:ss a");
+			SimpleDateFormat sdfOut = new SimpleDateFormat("yyyy/MM/dd HH:mm:ss");
 			while ((line = br.readLine()) != null) {
 				int clientPort = 0;
 				line = line.replaceAll("\\t", "");
@@ -68,15 +69,16 @@ public class AuthLogParser {
 						date = data[1];
 						eventID = Integer.parseInt(data[3]);
 						try {
+							logDate = sdf.parse(date);
+							
 							if (4769 == eventID && null == baseDate) {
 								baseDate = sdf.parse(date);
 								timeCnt--;
 							} else if (null != baseDate) {
-								logDate = sdf.parse(date);
 								long logTime = logDate.getTime();
 								long baseTime = baseDate.getTime();
 								long timeDiff = (baseTime - logTime) / 1000;
-								System.out.println(baseDate.toString()+","+logDate.toString()+","+timeDiff);
+								//System.out.println(date+","+sdfOut.format(new Date(logDate.getTime())));
 								if (timeDiff > 1) {
 									timeCnt--;
 									baseDate = sdf.parse(date);
@@ -94,7 +96,7 @@ public class AuthLogParser {
 						} else {
 							accountName = accountName.split("@")[0].toLowerCase();
 							if (4672 == eventID) {
-								evSet.add(new EventLogData(date, "", accountName, eventID, 0, "", "", timeCnt));
+								evSet.add(new EventLogData(sdfOut.format(new Date(logDate.getTime())), "", accountName, eventID, 0, "", "", timeCnt));
 								log.put(accountName, evSet);
 								eventID = -1;
 								accounts.add(accountName);
@@ -113,14 +115,14 @@ public class AuthLogParser {
 						clientAddress = parseElement(elem, ":", limit);
 					} else if ((elem.contains("クライアント ポート:") || elem.contains("Client Port:")) && 0 <= eventID) {
 						clientPort = Integer.parseInt(parseElement(elem, ":", limit));
-						evSet.add(new EventLogData(date, clientAddress, accountName, eventID, clientPort, serviceName,
+						evSet.add(new EventLogData(sdfOut.format(new Date(logDate.getTime())), clientAddress, accountName, eventID, clientPort, serviceName,
 								processName, timeCnt));
 						log.put(accountName, evSet);
 						eventID = -1;
 						serviceName = "";
 					} else if ((elem.contains("プロセス名:") || elem.contains("Process Name:")) && 0 <= eventID) {
 						processName = parseElement(elem, ":", 2).toLowerCase();
-						evSet.add(new EventLogData(date, clientAddress, accountName, eventID, clientPort, serviceName,
+						evSet.add(new EventLogData(sdfOut.format(new Date(logDate.getTime())), clientAddress, accountName, eventID, clientPort, serviceName,
 								processName, timeCnt));
 						log.put(accountName, evSet);
 						eventID = -1;
@@ -200,7 +202,7 @@ public class AuthLogParser {
 			// アカウント、端末ごとに4768/4769
 			boolean isTGTEvent = false;
 			boolean isSTEvent = false;
-			boolean isGolden = false;
+			short isGolden = 0;
 			Map.Entry<String, HashSet> entry = (Map.Entry<String, HashSet>) it.next();
 			HashSet<EventLogData> evS = (HashSet<EventLogData>) entry.getValue();
 			for (EventLogData ev : evS) {
@@ -212,12 +214,12 @@ public class AuthLogParser {
 				}
 			}
 			if (!isTGTEvent && isSTEvent) {
-				isGolden = true;
+				isGolden = 1;
 			}
 			for (EventLogData ev : evS) {
 				for (String cmd : SUSPICIOUS_CMD) {
 					if (ev.getProcessName().contains(cmd)) {
-						isGolden = true;
+						isGolden = 1;
 					}
 				}
 				pw.println(ev.getEventID() + ", " + ev.getDate() + ", " + ev.getAccountName() + ","
