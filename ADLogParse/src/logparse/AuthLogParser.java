@@ -55,7 +55,7 @@ public class AuthLogParser {
 			Date baseDate = null;
 			Date logDate = null;
 			short timeCnt = TIME_CNT;
-			SimpleDateFormat sdf = new SimpleDateFormat("MM/dd/yyyy hh:mm:ss a");
+			SimpleDateFormat sdf = new SimpleDateFormat("MM/dd/yyyy hh:mm:ss");
 			SimpleDateFormat sdfOut = new SimpleDateFormat("yyyy/MM/dd HH:mm:ss");
 			while ((line = br.readLine()) != null) {
 				int clientPort = 0;
@@ -160,7 +160,7 @@ public class AuthLogParser {
 			filewriter = new FileWriter(outputFileName, true);
 			bw = new BufferedWriter(filewriter);
 			pw = new PrintWriter(bw);
-			pw.println("eventID,date,account,ip,port,service,process,target,timeCnt");
+			pw.println("date,eventID,account,ip,port,service,process,timeCnt,target");
 
 			// アカウントごとに調べる
 			for (Iterator it = map.entrySet().iterator(); it.hasNext();) {
@@ -225,9 +225,9 @@ public class AuthLogParser {
 					}
 				}
 				long timeCnt=(ev.getAccountName()+ev.getClientAddress()).hashCode()+ev.getTimeCnt();
-				pw.println(ev.getEventID() + ", " + ev.getDate() + ", " + ev.getAccountName() + ","
+				pw.println(ev.getDate() + ", " + ev.getEventID() + ", " + ev.getAccountName() + ","
 						+ ev.getClientAddress() + ", " + ev.getClientPort() + ", " + ev.getServiceName() + ", "
-						+ ev.getProcessName() + ", " + isGolden + ", " + timeCnt);
+						+ ev.getProcessName() + ", "  + timeCnt+ ", " + isGolden);
 			}
 		}
 
