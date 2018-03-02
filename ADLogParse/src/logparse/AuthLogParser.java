@@ -57,20 +57,24 @@ public class AuthLogParser {
 			short timeCnt = TIME_CNT;
 			SimpleDateFormat sdf = new SimpleDateFormat("MM/dd/yyyy hh:mm:ss");
 			SimpleDateFormat sdfOut = new SimpleDateFormat("yyyy/MM/dd HH:mm:ss");
+			boolean isTargetEvent = false;
 			while ((line = br.readLine()) != null) {
 				int clientPort = 0;
 				line = line.replaceAll("\\t", "");
 				String[] data = line.split(",", 0);
 				for (String elem : data) {
+					if (line.contains("Microsoft-Windows-Security-Auditing,")) {
+						date = data[1];
+						eventID = Integer.parseInt(data[3]);
+					}
 					if (line.contains("Microsoft-Windows-Security-Auditing,4769")
 							|| line.contains("Microsoft-Windows-Security-Auditing,4768")
 							|| line.contains("Microsoft-Windows-Security-Auditing,4674")
 							|| line.contains("Microsoft-Windows-Security-Auditing,4672")) {
-						date = data[1];
-						eventID = Integer.parseInt(data[3]);
+						isTargetEvent = true;
 						try {
 							logDate = sdf.parse(date);
-							
+
 							if (4769 == eventID && null == baseDate) {
 								baseDate = sdf.parse(date);
 								timeCnt--;
@@ -78,7 +82,8 @@ public class AuthLogParser {
 								long logTime = logDate.getTime();
 								long baseTime = baseDate.getTime();
 								long timeDiff = (baseTime - logTime) / 1000;
-								//System.out.println(date+","+sdfOut.format(new Date(logDate.getTime())));
+								// System.out.println(date+","+sdfOut.format(new
+								// Date(logDate.getTime())));
 								if (timeDiff > 1) {
 									timeCnt--;
 									baseDate = sdf.parse(date);
@@ -89,46 +94,52 @@ public class AuthLogParser {
 							e.printStackTrace();
 						}
 
-					} else if (elem.contains("アカウント名:") || elem.contains("Account Name:")) {
-						accountName = parseElement(elem, ":", limit);
-						
-						if (accountName.isEmpty()) {
-							continue;
-						} else {
-							accountName = accountName.split("@")[0].toLowerCase();
-							if (4672 == eventID) {
-								evSet.add(new EventLogData(sdfOut.format(new Date(logDate.getTime())), "", accountName, eventID, 0, "", "", timeCnt));
-								log.put(accountName, evSet);
-								eventID = -1;
-								accounts.add(accountName);
+					} else if (isTargetEvent) {
+						if (elem.contains("アカウント名:") || elem.contains("Account Name:")) {
+							accountName = parseElement(elem, ":", limit);
+
+							if (accountName.isEmpty()) {
 								continue;
+							} else {
+								accountName = accountName.split("@")[0].toLowerCase();
+								if (null == log.get(accountName)) {
+									evSet = new HashSet<EventLogData>();
+								} else {
+									evSet = log.get(accountName);
+								}
+								if (4672 == eventID) {
+									evSet.add(new EventLogData(sdfOut.format(new Date(logDate.getTime())), "",
+											accountName, eventID, 0, "", "", timeCnt));
+									log.put(accountName, evSet);
+									eventID = -1;
+									accounts.add(accountName);
+									continue;
+								}
 							}
+
+						} else if (elem.contains("サービス名:") || elem.contains("Service Name:")) {
+							serviceName = parseElement(elem, ":", limit);
+						} else if (elem.contains("クライアント アドレス:") || elem.contains("Client Address:")) {
+							elem = elem.replaceAll("::ffff:", "");
+							clientAddress = parseElement(elem, ":", limit);
+
+						} else if ((elem.contains("クライアント ポート:") || elem.contains("Client Port:")) && 0 <= eventID) {
+							clientPort = Integer.parseInt(parseElement(elem, ":", limit));
+							evSet.add(new EventLogData(sdfOut.format(new Date(logDate.getTime())), clientAddress,
+									accountName, eventID, clientPort, serviceName, processName, timeCnt));
+							log.put(accountName, evSet);
+							eventID = -1;
+							serviceName = "";
+						} else if ((elem.contains("プロセス名:") || elem.contains("Process Name:")) && 0 <= eventID) {
+							processName = parseElement(elem, ":", 2).toLowerCase();
+							evSet.add(new EventLogData(sdfOut.format(new Date(logDate.getTime())), clientAddress,
+									accountName, eventID, clientPort, serviceName, processName, timeCnt));
+							log.put(accountName, evSet);
+							eventID = -1;
+							processName = "";
 						}
-						if (null == log.get(accountName)) {
-							evSet = new HashSet<EventLogData>();
-						} else {
-							evSet = log.get(accountName);
-						}
-					} else if (elem.contains("サービス名:") || elem.contains("Service Name:")) {
-						serviceName = parseElement(elem, ":", limit);
-					} else if (elem.contains("クライアント アドレス:") || elem.contains("Client Address:")) {
-						elem = elem.replaceAll("::ffff:", "");
-						clientAddress = parseElement(elem, ":", limit);
-						
-					} else if ((elem.contains("クライアント ポート:") || elem.contains("Client Port:")) && 0 <= eventID) {
-						clientPort = Integer.parseInt(parseElement(elem, ":", limit));
-						evSet.add(new EventLogData(sdfOut.format(new Date(logDate.getTime())), clientAddress, accountName, eventID, clientPort, serviceName,
-								processName, timeCnt));
-						log.put(accountName, evSet);
-						eventID = -1;
-						serviceName = "";
-					} else if ((elem.contains("プロセス名:") || elem.contains("Process Name:")) && 0 <= eventID) {
-						processName = parseElement(elem, ":", 2).toLowerCase();
-						evSet.add(new EventLogData(sdfOut.format(new Date(logDate.getTime())), clientAddress, accountName, eventID, clientPort, serviceName,
-								processName, timeCnt));
-						log.put(accountName, evSet);
-						eventID = -1;
-						processName = "";
+					} else{
+						isTargetEvent=false;
 					}
 				}
 			}
@@ -224,10 +235,10 @@ public class AuthLogParser {
 						isGolden = 1;
 					}
 				}
-				long timeCnt=(ev.getAccountName()+ev.getClientAddress()).hashCode()+ev.getTimeCnt();
+				long timeCnt = (ev.getAccountName() + ev.getClientAddress()).hashCode() + ev.getTimeCnt();
 				pw.println(ev.getDate() + ", " + ev.getEventID() + ", " + ev.getAccountName() + ","
 						+ ev.getClientAddress() + ", " + ev.getClientPort() + ", " + ev.getServiceName() + ", "
-						+ ev.getProcessName() + ", "  + timeCnt+ ", " + isGolden);
+						+ ev.getProcessName() + ", " + timeCnt + ", " + isGolden);
 			}
 		}
 
