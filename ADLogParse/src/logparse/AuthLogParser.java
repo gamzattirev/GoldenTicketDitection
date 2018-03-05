@@ -29,6 +29,8 @@ public class AuthLogParser {
 	private FileWriter filewriter = null;
 	private BufferedWriter bw = null;
 	private PrintWriter pw = null;
+	private SimpleDateFormat sdf = new SimpleDateFormat("yyyy/MM/dd HH:mm:ss");
+	//private SimpleDateFormat sdf = new SimpleDateFormat("MM/dd/yyyy hh:mm:ss a");
 
 	static {
 		SUSPICIOUS_CMD = new ArrayList<String>();
@@ -55,7 +57,6 @@ public class AuthLogParser {
 			Date baseDate = null;
 			Date logDate = null;
 			short timeCnt = TIME_CNT;
-			SimpleDateFormat sdf = new SimpleDateFormat("MM/dd/yyyy hh:mm:ss");
 			SimpleDateFormat sdfOut = new SimpleDateFormat("yyyy/MM/dd HH:mm:ss");
 			boolean isTargetEvent = false;
 			while ((line = br.readLine()) != null) {
@@ -70,7 +71,8 @@ public class AuthLogParser {
 					if (line.contains("Microsoft-Windows-Security-Auditing,4769")
 							|| line.contains("Microsoft-Windows-Security-Auditing,4768")
 							|| line.contains("Microsoft-Windows-Security-Auditing,4674")
-							|| line.contains("Microsoft-Windows-Security-Auditing,4672")) {
+							|| line.contains("Microsoft-Windows-Security-Auditing,4672")
+							|| line.contains("Microsoft-Windows-Security-Auditing,4624")) {
 						isTargetEvent = true;
 						try {
 							logDate = sdf.parse(date);
@@ -82,8 +84,7 @@ public class AuthLogParser {
 								long logTime = logDate.getTime();
 								long baseTime = baseDate.getTime();
 								long timeDiff = (baseTime - logTime) / 1000;
-								// System.out.println(date+","+sdfOut.format(new
-								// Date(logDate.getTime())));
+								//System.out.println(date+","+logDate+","+logDate.getTime()/1000L);
 								if (timeDiff > 1) {
 									timeCnt--;
 									baseDate = sdf.parse(date);
@@ -108,7 +109,7 @@ public class AuthLogParser {
 									evSet = log.get(accountName);
 								}
 								if (4672 == eventID) {
-									evSet.add(new EventLogData(sdfOut.format(new Date(logDate.getTime())), "",
+									evSet.add(new EventLogData(date, "",
 											accountName, eventID, 0, "", "", timeCnt));
 									log.put(accountName, evSet);
 									eventID = -1;
@@ -119,20 +120,25 @@ public class AuthLogParser {
 
 						} else if (elem.contains("サービス名:") || elem.contains("Service Name:")) {
 							serviceName = parseElement(elem, ":", limit);
-						} else if (elem.contains("クライアント アドレス:") || elem.contains("Client Address:")) {
+						} else if (elem.contains("クライアント アドレス:") || elem.contains("Client Address:") 
+							||elem.contains("ソース ネットワーク アドレス:") ) {
 							elem = elem.replaceAll("::ffff:", "");
 							clientAddress = parseElement(elem, ":", limit);
+							if(clientAddress.isEmpty()){
+								clientAddress="0";
+							}
 
-						} else if ((elem.contains("クライアント ポート:") || elem.contains("Client Port:")) && 0 <= eventID) {
+						} else if ((elem.contains("クライアント ポート:") || elem.contains("Client Port:")
+								|| elem.contains("ソース ポート:")) && 0 <= eventID) {
 							clientPort = Integer.parseInt(parseElement(elem, ":", limit));
-							evSet.add(new EventLogData(sdfOut.format(new Date(logDate.getTime())), clientAddress,
+							evSet.add(new EventLogData(date, clientAddress,
 									accountName, eventID, clientPort, serviceName, processName, timeCnt));
 							log.put(accountName, evSet);
 							eventID = -1;
 							serviceName = "";
 						} else if ((elem.contains("プロセス名:") || elem.contains("Process Name:")) && 0 <= eventID) {
 							processName = parseElement(elem, ":", 2).toLowerCase();
-							evSet.add(new EventLogData(sdfOut.format(new Date(logDate.getTime())), clientAddress,
+							evSet.add(new EventLogData(date, clientAddress,
 									accountName, eventID, clientPort, serviceName, processName, timeCnt));
 							log.put(accountName, evSet);
 							eventID = -1;
@@ -163,6 +169,9 @@ public class AuthLogParser {
 			System.out.println(elem);
 			e.printStackTrace();
 		}
+		if (value.isEmpty()){
+			value = "";
+		}
 		return value;
 	}
 
@@ -171,7 +180,8 @@ public class AuthLogParser {
 			filewriter = new FileWriter(outputFileName, true);
 			bw = new BufferedWriter(filewriter);
 			pw = new PrintWriter(bw);
-			pw.println("date,eventID,account,ip,port,service,process,timeCnt,target");
+			//pw.println("date,date_utime,eventID,account,ip,port,service,process,timeCnt,target");
+			pw.println("date_utime,eventID,account,ip,port,service,process,timeCnt");
 
 			// アカウントごとに調べる
 			for (Iterator it = map.entrySet().iterator(); it.hasNext();) {
@@ -236,9 +246,20 @@ public class AuthLogParser {
 					}
 				}
 				long timeCnt = (ev.getAccountName() + ev.getClientAddress()).hashCode() + ev.getTimeCnt();
-				pw.println(ev.getDate() + ", " + ev.getEventID() + ", " + ev.getAccountName() + ","
+				long time=0;
+				try {
+					 time=sdf.parse(ev.getDate()).getTime();
+				} catch (ParseException e) {
+					e.printStackTrace();
+				}
+				/*
+				pw.println(ev.getDate() + ", "+ time+", " + ev.getEventID() + ", " + ev.getAccountName() + ","
 						+ ev.getClientAddress() + ", " + ev.getClientPort() + ", " + ev.getServiceName() + ", "
 						+ ev.getProcessName() + ", " + timeCnt + ", " + isGolden);
+						*/
+				pw.println(time+", " + ev.getEventID() + ", " + ev.getAccountName() + ","
+						+ ev.getClientAddress() + ", " + ev.getClientPort() + ", " + ev.getServiceName() + ", "
+						+ ev.getProcessName() + ", " + timeCnt);
 			}
 		}
 
