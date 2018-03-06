@@ -9,7 +9,8 @@ public class EventLogData {
 	private int clientPort;
 	private String serviceName = "";
 	private String processName = "";
-	private short timeCnt;
+	private long timeCnt;
+	private short isGolden=0;
 	
 	EventLogData(String date, String clientAddress, String accountName, int eventID, int clientPort, String serviceName, 
 			String processName,short timeCnt){
@@ -53,7 +54,13 @@ public class EventLogData {
 	public String getProcessName(){
 		return this.processName;
 	}
-	public short getTimeCnt(){
+	public long getTimeCnt(){
 		return this.timeCnt;
+	}
+	public short isGolden(){
+		return this.isGolden;
+	}
+	public void setIsGolden(short isGolden){
+		this.isGolden=isGolden;
 	}
 }
