@@ -22,8 +22,9 @@ public class AuthLogParser {
 	 */
 	private static Map<String, HashSet> log;
 	private static String outputDirName = null;
-	private List<String> SUSPICIOUS_CMD = null;
 	private static short TIME_CNT = Short.MAX_VALUE;
+	private static float TRAIN_PERCENTAGE=0.75f;
+	private List<String> SUSPICIOUS_CMD = null;
 	private Set<String> accounts = new HashSet<String>();
 	private File file = null;
 	private FileWriter filewriter = null;
@@ -33,6 +34,9 @@ public class AuthLogParser {
 	private BufferedWriter bw2 = null;
 	private PrintWriter pw2 = null;
 	private SimpleDateFormat sdf = new SimpleDateFormat("yyyy/MM/dd HH:mm:ss");
+	private int logCnt=0;
+	private int trainNum=0;
+	private int currentTrainNum=0;
 	// private SimpleDateFormat sdf = new SimpleDateFormat("MM/dd/yyyy hh:mm:ss
 	// a");
 
@@ -107,6 +111,7 @@ public class AuthLogParser {
 								if (4672 == eventID) {
 									evSet.add(new EventLogData(date, "", accountName, eventID, 0, "", "", timeCnt));
 									log.put(accountName, evSet);
+									//logCnt++;
 									eventID = -1;
 									accounts.add(accountName);
 									continue;
@@ -129,6 +134,7 @@ public class AuthLogParser {
 							evSet.add(new EventLogData(date, clientAddress, accountName, eventID, clientPort,
 									serviceName, processName, timeCnt));
 							log.put(accountName, evSet);
+							//logCnt++;
 							eventID = -1;
 							serviceName = "";
 						} else if ((elem.contains("プロセス名:") || elem.contains("Process Name:")) && 0 <= eventID) {
@@ -136,6 +142,7 @@ public class AuthLogParser {
 							evSet.add(new EventLogData(date, clientAddress, accountName, eventID, clientPort,
 									serviceName, processName, timeCnt));
 							log.put(accountName, evSet);
+							//logCnt++;
 							eventID = -1;
 							processName = "";
 						}
@@ -145,7 +152,6 @@ public class AuthLogParser {
 				}
 			}
 			br.close();
-
 		} catch (IOException e) {
 			System.out.println(e);
 		}
@@ -180,10 +186,9 @@ public class AuthLogParser {
 			filewriter = new FileWriter(outputFileName, true);
 			bw = new BufferedWriter(filewriter);
 			pw = new PrintWriter(bw);
-			pw.println("date,date_utime,eventID,account,ip,port,service,process,timeCnt,target");
-			//pw.println("date_utime,eventID,account,ip,port,service,process,timeCnt,target");
+			pw.println("date_utime,eventID,account,ip,port,service,process,timeCnt,target");
 
-			filewriter2 = new FileWriter(outputDirName + "/" + "eventlog.csv" + "", true);
+			filewriter2 = new FileWriter(outputDirName + "/" + "mergedlog.csv" + "", true);
 			bw2 = new BufferedWriter(filewriter2);
 			pw2 = new PrintWriter(bw2);
 			// pw.println("date,date_utime,eventID,account,ip,port,service,process,timeCnt,target");
@@ -211,9 +216,11 @@ public class AuthLogParser {
 					}
 					evSet.add(ev);
 					kerlog.put(ev.getClientAddress(), evSet);
+					this.logCnt++;
 				}
 				isGoldenUsed(kerlog);
 
+				// 同じ時間帯のログごとに処理
 				for (EventLogData ev : evS) {
 					HashSet<EventLogData> evSet;
 					if (null != timeBasedlog.get(ev.getTimeCnt())) {
@@ -224,6 +231,10 @@ public class AuthLogParser {
 					evSet.add(ev);
 					timeBasedlog.put(ev.getTimeCnt(), evSet);
 				}
+				this.trainNum=Math.round(this.logCnt*this.TRAIN_PERCENTAGE);
+				//ファイルに出力する
+				outputLogs(timeBasedlog, accountName);
+				//マージする
 				mergeLogs(timeBasedlog, accountName);
 			}
 		} catch (IOException e) {
@@ -261,6 +272,7 @@ public class AuthLogParser {
 				isGolden = 1;
 				for (EventLogData ev : evS) {
 					ev.setIsGolden(isGolden);
+					this.logCnt--;
 				}
 			}
 			for (EventLogData ev : evS) {
@@ -268,21 +280,12 @@ public class AuthLogParser {
 					if (ev.getProcessName().contains(cmd)) {
 						isGolden = 1;
 						ev.setIsGolden(isGolden);
+						this.logCnt--;
 					}
 				}
+				// 同じアカウント・端末・時間帯のログに同じtimeCntを割り当てる
 				long timeCnt = (ev.getAccountName() + ev.getClientAddress()).hashCode() + ev.getTimeCnt();
-				long time = 0;
-				try {
-					time = sdf.parse(ev.getDate()).getTime();
-				} catch (ParseException e) {
-					e.printStackTrace();
-				}
-				
-				 pw.println(ev.getDate() + ", "+ time+", " + ev.getEventID() +
-				 ", " + ev.getAccountName() + "," + ev.getClientAddress() +
-				 ", " + ev.getClientPort() + ", " + ev.getServiceName() + ", "
-				 + ev.getProcessName() + ", " + timeCnt + ", " + isGolden);
-				 
+				ev.settimeCnt(timeCnt);
 				/*
 				pw.println(time + ", " + ev.getEventID() + ", " + ev.getAccountName() + "," + ev.getClientAddress()
 						+ ", " + ev.getClientPort() + ", " + ev.getServiceName() + ", " + ev.getProcessName() + ", "
@@ -341,6 +344,38 @@ public class AuthLogParser {
 				pw2.println(event + ", " + accountName + "," + clientAddress + ", " + clientPort + ", " + serviceName
 						+ ", " + processName+ ", " +isGolden );
 			}
+		}
+
+	}
+	
+	private void outputLogs(Map<Long, HashSet> kerlog, String accountName) {
+		long timeCnt=0;
+		for (Iterator it = kerlog.entrySet().iterator(); it.hasNext();) {
+			Map.Entry<Long, HashSet> entry = (Map.Entry<Long, HashSet>) it.next();
+			HashSet<EventLogData> evS = (HashSet<EventLogData>) entry.getValue();
+			String target="";		
+				for (EventLogData ev : evS) {
+					if(1==ev.isGolden()){
+						target="outlier";
+					} else if(currentTrainNum<=trainNum || timeCnt==ev.getTimeCnt()){
+						target="train";
+						currentTrainNum++;
+					} else{
+						target="test";
+					}
+					// UNIX Timeの計算
+					long time = 0;
+					try {
+						time = sdf.parse(ev.getDate()).getTime();
+					} catch (ParseException e) {
+						e.printStackTrace();
+					}
+					 pw.println(time+", " + ev.getEventID() +
+							 ", " + accountName + "," + ev.getClientAddress() +
+							 ", " + ev.getClientPort() + ", " + ev.getServiceName() + ", "
+							 + ev.getProcessName() + ", " + ev.getTimeCnt() + ", " + target);
+				}
+				timeCnt=entry.getKey();
 		}
 
 	}

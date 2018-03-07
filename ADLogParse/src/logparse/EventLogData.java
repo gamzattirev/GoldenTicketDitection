@@ -63,4 +63,7 @@ public class EventLogData {
 	public void setIsGolden(short isGolden){
 		this.isGolden=isGolden;
 	}
+	public void settimeCnt(long timeCnt){
+		this.timeCnt=timeCnt;
+	}
 }
