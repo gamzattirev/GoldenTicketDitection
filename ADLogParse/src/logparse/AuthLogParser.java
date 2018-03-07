@@ -77,7 +77,8 @@ public class AuthLogParser {
 							|| line.contains("Microsoft-Windows-Security-Auditing,4768")
 							|| line.contains("Microsoft-Windows-Security-Auditing,4674")
 							|| line.contains("Microsoft-Windows-Security-Auditing,4672")
-							|| line.contains("Microsoft-Windows-Security-Auditing,4624")) {
+							|| line.contains("Microsoft-Windows-Security-Auditing,4624")
+							|| line.contains("Microsoft-Windows-Security-Auditing,5140")) {
 						isTargetEvent = true;
 						try {
 							logDate = sdf.parse(date);
@@ -126,7 +127,7 @@ public class AuthLogParser {
 						} else if (elem.contains("サービス名:") || elem.contains("Service Name:")) {
 							serviceName = parseElement(elem, ":", limit);
 						} else if (elem.contains("クライアント アドレス:") || elem.contains("Client Address:")
-								|| elem.contains("ソース ネットワーク アドレス:")) {
+								|| elem.contains("ソース ネットワーク アドレス:")|| elem.contains("送信元アドレス:")) {
 							elem = elem.replaceAll("::ffff:", "");
 							clientAddress = parseElement(elem, ":", limit);
 							if (clientAddress.isEmpty()) {
@@ -139,17 +140,23 @@ public class AuthLogParser {
 							evSet.add(new EventLogData(date, clientAddress, accountName, eventID, clientPort,
 									serviceName, processName, timeCnt));
 							log.put(accountName, evSet);
-							//logCnt++;
-							eventID = -1;
+							//eventID = -1;
 							serviceName = "";
 						} else if ((elem.contains("プロセス名:") || elem.contains("Process Name:")) && 0 <= eventID) {
 							processName = parseElement(elem, ":", 2).toLowerCase();
 							evSet.add(new EventLogData(date, clientAddress, accountName, eventID, clientPort,
 									serviceName, processName, timeCnt));
 							log.put(accountName, evSet);
-							//logCnt++;
 							eventID = -1;
 							processName = "";
+						} else if (elem.contains("共有名:")) {
+							// ひとまずサービス名に入れる
+							serviceName = parseElement(elem, ":", 2).toLowerCase();
+							evSet.add(new EventLogData(date, clientAddress, accountName, eventID, clientPort,
+									serviceName, processName, timeCnt));
+							log.put(accountName, evSet);
+							eventID = -1;
+							serviceName = "";
 						}
 					} else {
 						isTargetEvent = false;
@@ -296,8 +303,16 @@ public class AuthLogParser {
 					ev.setIsGolden(isGolden);
 					this.logCnt--;
 				}
-			}
+			} else {
 			for (EventLogData ev : evS) {
+				if(5140==ev.getEventID()){
+					if(ev.getServiceName().contains("\\c$")){
+						isGolden = 1;
+						ev.setIsGolden(isGolden);
+						this.logCnt--;
+					}
+				} else if(4674==ev.getEventID()){
+					// 攻撃者がよく実行するコマンドを実行している
 				for (String cmd : SUSPICIOUS_CMD) {
 					if (ev.getProcessName().contains(cmd)) {
 						isGolden = 1;
@@ -305,9 +320,11 @@ public class AuthLogParser {
 						this.logCnt--;
 					}
 				}
+				}
 				// 同じアカウント・端末・時間帯のログに同じtimeCntを割り当てる
 				long timeCnt = (ev.getAccountName() + ev.getClientAddress()).hashCode() + ev.getTimeCnt();
 				ev.settimeCnt(timeCnt);
+			}
 			}
 		}
 
