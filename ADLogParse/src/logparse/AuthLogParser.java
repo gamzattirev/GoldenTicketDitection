@@ -20,12 +20,12 @@ public class AuthLogParser {
 	/**
 	 * Specify file name of mimikatz
 	 */
-	private static Map<String, HashSet> log;
+	private static Map<String, LinkedHashSet> log;
 	private static String outputDirName = null;
 	private static short TIME_CNT = Short.MAX_VALUE;
 	private static float TRAIN_PERCENTAGE=0.75f;
 	private List<String> SUSPICIOUS_CMD = null;
-	private Set<String> accounts = new HashSet<String>();
+	private Set<String> accounts = new LinkedHashSet<String>();
 	private File file = null;
 	private FileWriter filewriter = null;
 	private BufferedWriter bw = null;
@@ -48,7 +48,8 @@ public class AuthLogParser {
 			String line;
 			int eventID = -1;
 			String date = "";
-			HashSet<EventLogData> evSet = null;
+			//時刻順に格納する
+			LinkedHashSet<EventLogData> evSet = null;
 			String accountName = "";
 			String clientAddress = "";
 			String serviceName = "";
@@ -104,7 +105,7 @@ public class AuthLogParser {
 							} else {
 								accountName = accountName.split("@")[0].toLowerCase();
 								if (null == log.get(accountName)) {
-									evSet = new HashSet<EventLogData>();
+									evSet = new LinkedHashSet<EventLogData>();
 								} else {
 									evSet = log.get(accountName);
 								}
@@ -194,26 +195,27 @@ public class AuthLogParser {
 			pw2 = new PrintWriter(bw2);
 			// pw.println("date,date_utime,eventID,account,ip,port,service,process,timeCnt,target");
 			pw2.println("eventID,account,ip,port,service,process,target");
+			ArrayList <EventLogData> list=null;
 
 			// アカウントごとに分類する
 			for (Iterator it = map.entrySet().iterator(); it.hasNext();) {
-				Map.Entry<String, HashSet> entry = (Map.Entry<String, HashSet>) it.next();
+				Map.Entry<String, LinkedHashSet> entry = (Map.Entry<String, LinkedHashSet>) it.next();
 				String accountName = (String) entry.getKey();
 				if (!accounts.contains(accountName)) {
+					//特権を使っているアカウントのみ抽出
 					continue;
 				}
-				HashSet<EventLogData> evS = (HashSet<EventLogData>) entry.getValue();
-				HashSet<String> imageLoadedList = new HashSet<String>();
-				Map<String, HashSet> kerlog = new HashMap<String, HashSet>();
-				Map<Long, HashSet> timeBasedlog = new HashMap<Long, HashSet>();
+				LinkedHashSet<EventLogData> evS = (LinkedHashSet<EventLogData>) entry.getValue();
+				Map<String, LinkedHashSet> kerlog = new LinkedHashMap<String, LinkedHashSet>();
+				Map<Long, LinkedHashSet> timeBasedlog = new LinkedHashMap<Long, LinkedHashSet>();
 
 				// さらにクライアントアドレスごとに分類し、GTが使われている可能性があるかを判定する
 				for (EventLogData ev : evS) {
-					HashSet<EventLogData> evSet;
+					LinkedHashSet<EventLogData> evSet;
 					if (null != kerlog.get(ev.getClientAddress())) {
 						evSet = kerlog.get(ev.getClientAddress());
 					} else {
-						evSet = new HashSet<EventLogData>();
+						evSet = new LinkedHashSet<EventLogData>();
 					}
 					evSet.add(ev);
 					kerlog.put(ev.getClientAddress(), evSet);
@@ -222,12 +224,14 @@ public class AuthLogParser {
 				isGoldenUsed(kerlog);
 
 				// 同じ時間帯のログごとに処理
-				for (EventLogData ev : evS) {
-					HashSet<EventLogData> evSet;
+				list=new ArrayList <EventLogData>(evS);
+				Collections.reverse(list);
+				for (EventLogData ev : list) {
+					LinkedHashSet<EventLogData> evSet;
 					if (null != timeBasedlog.get(ev.getTimeCnt())) {
 						evSet = timeBasedlog.get(ev.getTimeCnt());
 					} else {
-						evSet = new HashSet<EventLogData>();
+						evSet = new LinkedHashSet<EventLogData>();
 					}
 					evSet.add(ev);
 					timeBasedlog.put(ev.getTimeCnt(), evSet);
@@ -252,14 +256,14 @@ public class AuthLogParser {
 		}
 	}
 
-	private void isGoldenUsed(Map<String, HashSet> kerlog) {
+	private void isGoldenUsed(Map<String, LinkedHashSet> kerlog) {
 		// kerlogは端末毎に分類されたログ
 		for (Iterator it = kerlog.entrySet().iterator(); it.hasNext();) {
 			boolean isTGTEvent = false;
 			boolean isSTEvent = false;
 			short isGolden = 0;
-			Map.Entry<String, HashSet> entry = (Map.Entry<String, HashSet>) it.next();
-			HashSet<EventLogData> evS = (HashSet<EventLogData>) entry.getValue();
+			Map.Entry<String, LinkedHashSet> entry = (Map.Entry<String, LinkedHashSet>) it.next();
+			LinkedHashSet<EventLogData> evS = (LinkedHashSet<EventLogData>) entry.getValue();
 			for (EventLogData ev : evS) {
 				int eventID = ev.getEventID();
 				// 4768/4769が記録されているかを調べる
@@ -293,12 +297,12 @@ public class AuthLogParser {
 
 	}
 
-	private void mergeLogs(Map<Long, HashSet> kerlog, String accountName) {
+	private void mergeLogs(Map<Long, LinkedHashSet> kerlog, String accountName) {
 		for (Iterator it = kerlog.entrySet().iterator(); it.hasNext();) {
-			Map.Entry<Long, HashSet> entry = (Map.Entry<Long, HashSet>) it.next();
-			HashSet<EventLogData> evS = (HashSet<EventLogData>) entry.getValue();
-			Map<String, HashSet> map = new HashMap<String, HashSet>();
-			HashSet<EventLogData> set = null;
+			Map.Entry<Long, LinkedHashSet> entry = (Map.Entry<Long, LinkedHashSet>) it.next();
+			LinkedHashSet<EventLogData> evS = (LinkedHashSet<EventLogData>) entry.getValue();
+			Map<String, LinkedHashSet> map = new LinkedHashMap<String, LinkedHashSet>();
+			LinkedHashSet<EventLogData> set = null;
 			// 端末毎に分類する
 			String clientAddress = "";
 			for (EventLogData ev : evS) {
@@ -306,14 +310,14 @@ public class AuthLogParser {
 					if (null != map.get(ev.getClientAddress())) {
 						set = map.get(ev.getClientAddress());
 					} else {
-						set = new HashSet<EventLogData>();
+						set = new LinkedHashSet<EventLogData>();
 					}
 				} else {
 					// 端末情報が出ないログは、直前に処理した端末と同じとみなす
 					if (null != map.get(ev.getClientAddress())) {
 						set = map.get(clientAddress);
 					} else {
-						set = new HashSet<EventLogData>();
+						set = new LinkedHashSet<EventLogData>();
 					}
 				}
 				set.add(ev);
@@ -326,9 +330,9 @@ public class AuthLogParser {
 			String processName = "";
 			short isGolden=0;
 			for (Iterator itTerm = map.entrySet().iterator(); itTerm.hasNext();) {
-				Map.Entry<String, HashSet> entryTerm = (Map.Entry<String, HashSet>) itTerm.next();
+				Map.Entry<String, LinkedHashSet> entryTerm = (Map.Entry<String, LinkedHashSet>) itTerm.next();
 				clientAddress = entryTerm.getKey();
-				HashSet<EventLogData> evSTerm = (HashSet<EventLogData>) entryTerm.getValue();
+				LinkedHashSet<EventLogData> evSTerm = (LinkedHashSet<EventLogData>) entryTerm.getValue();
 				for (EventLogData ev : evS) {
 					event = event += String.valueOf(ev.getEventID());
 					clientPort = clientPort += ev.getClientPort();
@@ -345,13 +349,16 @@ public class AuthLogParser {
 
 	}
 	
-	private void outputLogs(Map<Long, HashSet> kerlog, String accountName) {
+	private void outputLogs(Map<Long, LinkedHashSet> kerlog, String accountName) {
 		long timeCnt=0;
+		ArrayList <EventLogData> list=null;
 		for (Iterator it = kerlog.entrySet().iterator(); it.hasNext();) {
-			Map.Entry<Long, HashSet> entry = (Map.Entry<Long, HashSet>) it.next();
-			HashSet<EventLogData> evS = (HashSet<EventLogData>) entry.getValue();
+			Map.Entry<Long, LinkedHashSet> entry = (Map.Entry<Long, LinkedHashSet>) it.next();
+			LinkedHashSet<EventLogData> evS = (LinkedHashSet<EventLogData>) entry.getValue();
+			list=new ArrayList <EventLogData>(evS);
+			Collections.reverse(list);
 			String target="";		
-				for (EventLogData ev : evS) {
+				for (EventLogData ev : list) {
 					if(1==ev.isGolden()){
 						target="outlier";
 					} else if(currentTrainNum<=trainNum || timeCnt==ev.getTimeCnt()){
@@ -447,7 +454,7 @@ public class AuthLogParser {
 		if (args.length > 1) {
 			outputDirName = args[1];
 		}
-		log = new HashMap<String, HashSet>();
+		log = new LinkedHashMap<String, LinkedHashSet>();
 		sysmonParser.createSuspiciousCmd(inputdirname);
 		sysmonParser.detelePrevFiles(outputDirName);
 		sysmonParser.detectGolden(inputdirname);
