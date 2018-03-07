@@ -186,7 +186,8 @@ public class AuthLogParser {
 			filewriter = new FileWriter(outputFileName, true);
 			bw = new BufferedWriter(filewriter);
 			pw = new PrintWriter(bw);
-			pw.println("date_utime,eventID,account,ip,port,service,process,timeCnt,target");
+			//pw.println("date_utime,eventID,account,ip,port,service,process,timeCnt,target");
+			pw.println("date,date_utime,eventID,account,ip,port,service,process,timeCnt,target");
 
 			filewriter2 = new FileWriter(outputDirName + "/" + "mergedlog.csv" + "", true);
 			bw2 = new BufferedWriter(filewriter2);
@@ -269,6 +270,7 @@ public class AuthLogParser {
 				}
 			}
 			if (!isTGTEvent && isSTEvent) {
+				// 4768が記録されていないのに、4769が記録されている
 				isGolden = 1;
 				for (EventLogData ev : evS) {
 					ev.setIsGolden(isGolden);
@@ -286,11 +288,6 @@ public class AuthLogParser {
 				// 同じアカウント・端末・時間帯のログに同じtimeCntを割り当てる
 				long timeCnt = (ev.getAccountName() + ev.getClientAddress()).hashCode() + ev.getTimeCnt();
 				ev.settimeCnt(timeCnt);
-				/*
-				pw.println(time + ", " + ev.getEventID() + ", " + ev.getAccountName() + "," + ev.getClientAddress()
-						+ ", " + ev.getClientPort() + ", " + ev.getServiceName() + ", " + ev.getProcessName() + ", "
-						+ timeCnt+ ", " + isGolden);
-						*/
 			}
 		}
 
@@ -370,10 +367,10 @@ public class AuthLogParser {
 					} catch (ParseException e) {
 						e.printStackTrace();
 					}
-					 pw.println(time+", " + ev.getEventID() +
-							 ", " + accountName + "," + ev.getClientAddress() +
-							 ", " + ev.getClientPort() + ", " + ev.getServiceName() + ", "
-							 + ev.getProcessName() + ", " + ev.getTimeCnt() + ", " + target);
+					 pw.println(ev.getDate()+"," +time+"," + ev.getEventID() +
+							 "," + accountName + "," + ev.getClientAddress() +
+							 "," + ev.getClientPort() + "," + ev.getServiceName() + ","
+							 + ev.getProcessName() + "," + ev.getTimeCnt() + "," + target);
 				}
 				timeCnt=entry.getKey();
 		}
