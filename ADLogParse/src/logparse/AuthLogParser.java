@@ -26,17 +26,21 @@ public class AuthLogParser {
 	private static float TRAIN_PERCENTAGE=0.75f;
 	private List<String> SUSPICIOUS_CMD = null;
 	private Set<String> accounts = new LinkedHashSet<String>();
-	private File file = null;
 	private FileWriter filewriter = null;
 	private BufferedWriter bw = null;
 	private PrintWriter pw = null;
 	private FileWriter filewriter2 = null;
 	private BufferedWriter bw2 = null;
 	private PrintWriter pw2 = null;
+	private FileWriter filewriter3 = null;
+	private BufferedWriter bw3 = null;
+	private PrintWriter pw3 = null;
 	private SimpleDateFormat sdf = new SimpleDateFormat("yyyy/MM/dd HH:mm:ss");
 	private int logCnt=0;
 	private int trainNum=0;
 	private int currentTrainNum=0;
+	private int currentTrainNum2=0;
+	private long id=0;
 	// private SimpleDateFormat sdf = new SimpleDateFormat("MM/dd/yyyy hh:mm:ss
 	// a");
 
@@ -195,8 +199,16 @@ public class AuthLogParser {
 			pw2 = new PrintWriter(bw2);
 			// pw.println("date,date_utime,eventID,account,ip,port,service,process,timeCnt,target");
 			pw2.println("eventID,account,ip,port,service,process,target");
+			
+			filewriter3 = new FileWriter(outputDirName + "/" + "timeseriselog.csv" + "", true);
+			bw3 = new BufferedWriter(filewriter3);
+			pw3 = new PrintWriter(bw3);
+			//pw.println("date_utime,eventID,account,ip,port,service,process,timeCnt,target");
+			pw3.println("id,eventID_p,account_p,ip_p,service_p,process_p,"
+					+ "eventID_c,account_c,ip_c,service_c,process_c,target");
+			
 			ArrayList <EventLogData> list=null;
-
+			
 			// アカウントごとに分類する
 			for (Iterator it = map.entrySet().iterator(); it.hasNext();) {
 				Map.Entry<String, LinkedHashSet> entry = (Map.Entry<String, LinkedHashSet>) it.next();
@@ -239,6 +251,8 @@ public class AuthLogParser {
 				this.trainNum=Math.round(this.logCnt*this.TRAIN_PERCENTAGE);
 				//ファイルに出力する
 				outputLogs(timeBasedlog, accountName);
+				// time seriesログを出力する
+				outputTimeSeriseLogs(timeBasedlog, accountName);
 				//マージする
 				mergeLogs(timeBasedlog, accountName);
 			}
@@ -247,9 +261,11 @@ public class AuthLogParser {
 		} finally {
 			pw.close();
 			pw2.close();
+			pw3.close();
 			try {
 				bw.close();
 				bw2.close();
+				bw3.close();
 			} catch (IOException e) {
 				e.printStackTrace();
 			}
@@ -355,10 +371,10 @@ public class AuthLogParser {
 		for (Iterator it = kerlog.entrySet().iterator(); it.hasNext();) {
 			Map.Entry<Long, LinkedHashSet> entry = (Map.Entry<Long, LinkedHashSet>) it.next();
 			LinkedHashSet<EventLogData> evS = (LinkedHashSet<EventLogData>) entry.getValue();
-			list=new ArrayList <EventLogData>(evS);
-			Collections.reverse(list);
+			//list=new ArrayList <EventLogData>(evS);
+			//Collections.reverse(list);
 			String target="";		
-				for (EventLogData ev : list) {
+				for (EventLogData ev : evS) {
 					if(1==ev.isGolden()){
 						target="outlier";
 					} else if(currentTrainNum<=trainNum || timeCnt==ev.getTimeCnt()){
@@ -382,6 +398,43 @@ public class AuthLogParser {
 				timeCnt=entry.getKey();
 		}
 
+	}
+	
+	private void outputTimeSeriseLogs(Map<Long, LinkedHashSet> kerlog, String accountName) {
+		long timeCnt=0;
+		ArrayList <EventLogData> list=null;
+		for (Iterator it = kerlog.entrySet().iterator(); it.hasNext();) {
+			Map.Entry<Long, LinkedHashSet> entry = (Map.Entry<Long, LinkedHashSet>) it.next();
+			LinkedHashSet<EventLogData> evS = (LinkedHashSet<EventLogData>) entry.getValue();
+			//list=new ArrayList <EventLogData>(evS);
+			//Collections.reverse(list);
+			String target="";
+			EventLogData prevEv=null;
+				for (EventLogData ev : evS) {
+					if(1==ev.isGolden()){
+						target="outlier";
+					} else if(currentTrainNum2<=trainNum || timeCnt==ev.getTimeCnt()){
+						target="train";
+						currentTrainNum2++;
+					} else{
+						target="test";
+					}
+					this.id++;
+					pw3.print(this.id+",");
+					if(null==prevEv){
+						 pw3.print("-,-,-,-,-");
+					} else{
+					 pw3.print(prevEv.getEventID() +"," + accountName + "," + prevEv.getClientAddress() +
+							 "," + prevEv.getServiceName() + ","+ prevEv.getProcessName() );
+					}
+					 pw3.println("," + ev.getEventID() +"," + accountName + "," + ev.getClientAddress() +
+							 "," + ev.getServiceName() + ","+ ev.getProcessName() 
+							 + "," + target);
+					 prevEv=new EventLogData(ev.getDate(),ev.getClientAddress(),accountName,ev.getEventID(),
+							 ev.getClientPort(),ev.getServiceName(),ev.getProcessName(),ev.getTimeCnt());
+				}
+				timeCnt=entry.getKey();
+		}
 	}
 
 	/**

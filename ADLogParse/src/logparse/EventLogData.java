@@ -13,7 +13,7 @@ public class EventLogData {
 	private short isGolden=0;
 	
 	EventLogData(String date, String clientAddress, String accountName, int eventID, int clientPort, String serviceName, 
-			String processName,short timeCnt){
+			String processName,long timeCnt){
 		this.date=date;
 		this.accountName=accountName;
 		this.clientAddress=clientAddress;
