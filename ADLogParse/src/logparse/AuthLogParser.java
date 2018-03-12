@@ -9,23 +9,26 @@ import java.text.*;
 import java.util.*;
 
 /**
- * Detect mimikatz comparing Common DLL List with exported Sysmon event log.
- * Output processes that load all DLLs in Common DLL List and detection rate.
+ * Golden Ticket detection using Windows Event log.
  * 
  * @version 1.0
  * @author Mariko Fujimoto
  */
 public class AuthLogParser {
 
-	/**
-	 * Specify file name of mimikatz
-	 */
-	private static Map<String, LinkedHashSet> log;
+	//キーはアカウント名、値はEventLogDataオブジェクトのリスト。アカウント毎に分類するため
+	private static Map<String, LinkedHashSet<EventLogData>> log;
 	private static String outputDirName = null;
+
+	// Initial value for timeCnt
 	private static short TIME_CNT = Short.MAX_VALUE;
-	private static float TRAIN_PERCENTAGE=0.75f;
-	private List<String> SUSPICIOUS_CMD = null;
+
+	// Suspicious command list
+	private List<String> suspiciousCmd = null;
+
+	// account name for detection(Domain Admin Privilege accounts)
 	private Set<String> accounts = new LinkedHashSet<String>();
+
 	private FileWriter filewriter = null;
 	private BufferedWriter bw = null;
 	private PrintWriter pw = null;
@@ -35,13 +38,19 @@ public class AuthLogParser {
 	private FileWriter filewriter3 = null;
 	private BufferedWriter bw3 = null;
 	private PrintWriter pw3 = null;
+
+	// Data format
 	private static SimpleDateFormat sdf = new SimpleDateFormat("yyyy/MM/dd HH:mm:ss");
-	private int logCnt=0;
-	private int trainNum=0;
-	private int currentTrainNum=0;
-	private int currentTrainNum2=0;
-	private long id=0;
-	private static long attackStartTime=0;
+
+	private int trainNum = 0;
+	private int currentTrainNum2 = 0;
+	private long id = 0;
+	private static long attackStartTime = 0;
+	private int logCnt = 0;
+
+	// Parameters for calculate number of train data(not used now)
+	// private static float TRAIN_PERCENTAGE=0.75f;
+	// private int currentTrainNum=0;
 
 	private void readCSV(String filename) {
 
@@ -51,61 +60,65 @@ public class AuthLogParser {
 			String line;
 			int eventID = -1;
 			String date = "";
-			//時刻順に格納する
 			LinkedHashSet<EventLogData> evSet = null;
 			String accountName = "";
 			String clientAddress = "";
 			String serviceName = "";
 			String processName = "";
+			boolean isTargetEvent = false;
+			
+			// splitする際の上限回数
 			int limit = 0;
+
+			// categorize same operations based on time stamp
+			short timeCnt = TIME_CNT;
 			Date baseDate = null;
 			Date logDate = null;
-			short timeCnt = TIME_CNT;
-			boolean isTargetEvent = false;
+
 			while ((line = br.readLine()) != null) {
 				int clientPort = 0;
+				// Remove tab
 				line = line.replaceAll("\\t", "");
 				String[] data = line.split(",", 0);
 				for (String elem : data) {
 					if (line.contains("Microsoft-Windows-Security-Auditing,")) {
 						date = data[1];
 						eventID = Integer.parseInt(data[3]);
-					}
-					if (line.contains("Microsoft-Windows-Security-Auditing,4769")
-							|| line.contains("Microsoft-Windows-Security-Auditing,4768")
-							|| line.contains("Microsoft-Windows-Security-Auditing,4674")
-							|| line.contains("Microsoft-Windows-Security-Auditing,4672")
-							|| line.contains("Microsoft-Windows-Security-Auditing,4624")
-							|| line.contains("Microsoft-Windows-Security-Auditing,5140")) {
-						isTargetEvent = true;
-						try {
-							logDate = sdf.parse(date);
-
-							if (4769 == eventID && null == baseDate) {
-								baseDate = sdf.parse(date);
-								timeCnt--;
-							} else if (null != baseDate) {
-								long logTime = logDate.getTime();
-								long baseTime = baseDate.getTime();
-								long timeDiff = (baseTime - logTime) / 1000;
-								// System.out.println(date+","+logDate+","+logDate.getTime()/1000L);
-								if (timeDiff > 1) {
-									timeCnt--;
+						if (line.contains("4769") || line.contains("4768") || line.contains("4674")
+								|| line.contains("4672") || line.contains("4624") || line.contains("5140")) {
+							// Event for investigation
+							isTargetEvent = true;
+							try {
+								// Get date
+								logDate = sdf.parse(date);
+								if (4769 == eventID && null == baseDate) {
+									// 4769 を起点として同じ時間帯に出ているログを調べる
 									baseDate = sdf.parse(date);
+									timeCnt--;
+								} else if (null != baseDate) {
+									// ログのタイムスタンプ差を調べる
+									long logTime = logDate.getTime();
+									long baseTime = baseDate.getTime();
+									long timeDiff = (baseTime - logTime) / 1000;
+									if (timeDiff > 1) {
+										// 1秒以上離れているログには異なるtimeCntを割り当てる
+										timeCnt--;
+										baseDate = sdf.parse(date);
+									}
 								}
+
+							} catch (ParseException e) {
+								e.printStackTrace();
 							}
 
-						} catch (ParseException e) {
-							e.printStackTrace();
 						}
-
 					} else if (isTargetEvent) {
 						if (elem.contains("アカウント名:") || elem.contains("Account Name:")) {
 							accountName = parseElement(elem, ":", limit);
-
 							if (accountName.isEmpty()) {
 								continue;
 							} else {
+								// ドメイン名は取り除き、全て小文字にする
 								accountName = accountName.split("@")[0].toLowerCase();
 								if (null == log.get(accountName)) {
 									evSet = new LinkedHashSet<EventLogData>();
@@ -113,10 +126,10 @@ public class AuthLogParser {
 									evSet = log.get(accountName);
 								}
 								if (4672 == eventID) {
+									// 4672はこれ以上情報がないので、アカウント名だけ取得
 									evSet.add(new EventLogData(date, "", accountName, eventID, 0, "", "", timeCnt));
 									log.put(accountName, evSet);
-									//logCnt++;
-									eventID = -1;
+									// 管理者アカウントリストに入れる
 									accounts.add(accountName);
 									continue;
 								}
@@ -125,7 +138,7 @@ public class AuthLogParser {
 						} else if (elem.contains("サービス名:") || elem.contains("Service Name:")) {
 							serviceName = parseElement(elem, ":", limit);
 						} else if (elem.contains("クライアント アドレス:") || elem.contains("Client Address:")
-								|| elem.contains("ソース ネットワーク アドレス:")|| elem.contains("送信元アドレス:")) {
+								|| elem.contains("ソース ネットワーク アドレス:") || elem.contains("送信元アドレス:")) {
 							elem = elem.replaceAll("::ffff:", "");
 							clientAddress = parseElement(elem, ":", limit);
 							if (clientAddress.isEmpty()) {
@@ -133,27 +146,31 @@ public class AuthLogParser {
 							}
 
 						} else if ((elem.contains("クライアント ポート:") || elem.contains("Client Port:")
-								|| elem.contains("ソース ポート:")) && 0 <= eventID) {
+								|| elem.contains("ソース ポート:"))) {
+							try{ 
 							clientPort = Integer.parseInt(parseElement(elem, ":", limit));
+							} catch (NumberFormatException e){
+								// nothing
+							}
 							evSet.add(new EventLogData(date, clientAddress, accountName, eventID, clientPort,
 									serviceName, processName, timeCnt));
-							log.put(accountName, evSet);
-							//eventID = -1;
-							serviceName = "";
-						} else if ((elem.contains("プロセス名:") || elem.contains("Process Name:")) && 0 <= eventID) {
+							if (5140!=eventID){
+								//  5140は共有名の情報を取得してから格納する
+								log.put(accountName, evSet);
+							}
+						} else if ((elem.contains("プロセス名:") || elem.contains("Process Name:"))) {
+							// プロセス名は":"が含まれることがあることを考慮
 							processName = parseElement(elem, ":", 2).toLowerCase();
 							evSet.add(new EventLogData(date, clientAddress, accountName, eventID, clientPort,
 									serviceName, processName, timeCnt));
 							log.put(accountName, evSet);
-							eventID = -1;
 							processName = "";
 						} else if (elem.contains("共有名:")) {
-							// ひとまずサービス名に入れる
+							// カラムを増やしたくないので、サービス名に入れる
 							serviceName = parseElement(elem, ":", 2).toLowerCase();
 							evSet.add(new EventLogData(date, clientAddress, accountName, eventID, clientPort,
 									serviceName, processName, timeCnt));
 							log.put(accountName, evSet);
-							eventID = -1;
 							serviceName = "";
 						}
 					} else {
@@ -182,48 +199,53 @@ public class AuthLogParser {
 		}
 		if (value.isEmpty()) {
 			value = "";
-		} 
-		/*
-		else if (value.equals("-")) {
-			value = "";
 		}
-		*/
+		/*
+		 * else if (value.equals("-")) { value = ""; }
+		 */
 		return value;
 	}
 
 	private void outputResults(Map map, String outputFileName) {
 		try {
+			// normal result
 			filewriter = new FileWriter(outputFileName, true);
 			bw = new BufferedWriter(filewriter);
 			pw = new PrintWriter(bw);
-			//pw.println("date_utime,eventID,account,ip,port,service,process,timeCnt,target");
+			// pw.println("date_utime,eventID,account,ip,port,service,process,timeCnt,target");
 			pw.println("date,date_utime,eventID,account,ip,service,process,timeCnt,target");
 
+			// result of merged log based on timeCnt
 			filewriter2 = new FileWriter(outputDirName + "/" + "mergedlog.csv" + "", true);
 			bw2 = new BufferedWriter(filewriter2);
 			pw2 = new PrintWriter(bw2);
 			// pw.println("date,date_utime,eventID,account,ip,port,service,process,timeCnt,target");
 			pw2.println("eventID,account,ip,port,service,process,target");
-			
-			filewriter3 = new FileWriter(outputDirName + "/" + "timeseriselog.csv" + "", true);
+
+			// for time series analysis
+			filewriter3 = new FileWriter(outputDirName + "/" + "timeserieslog.csv" + "", true);
 			bw3 = new BufferedWriter(filewriter3);
 			pw3 = new PrintWriter(bw3);
-			//pw.println("date_utime,eventID,account,ip,port,service,process,timeCnt,target");
+			// pw.println("date_utime,eventID,account,ip,port,service,process,timeCnt,target");
 			pw3.println("id,eventID_p,account_p,ip_p,service_p,process_p,"
 					+ "eventID_c,account_c,ip_c,service_c,process_c,target");
-			
-			ArrayList <EventLogData> list=null;
-			
+
+			ArrayList<EventLogData> list = null;
+
 			// アカウントごとに分類する
 			for (Iterator it = map.entrySet().iterator(); it.hasNext();) {
 				Map.Entry<String, LinkedHashSet> entry = (Map.Entry<String, LinkedHashSet>) it.next();
 				String accountName = (String) entry.getKey();
 				if (!accounts.contains(accountName)) {
-					//特権を使っているアカウントのみ抽出
+					// 特権を使っているアカウントのみ抽出
 					continue;
 				}
 				LinkedHashSet<EventLogData> evS = (LinkedHashSet<EventLogData>) entry.getValue();
+				
+				// クライアントアドレス毎にログを保持するためのリスト(キー：クライアントアドレス)
 				Map<String, LinkedHashSet> kerlog = new LinkedHashMap<String, LinkedHashSet>();
+				
+				// 同じ時間帯毎にログを保持するためのリスト(キー：クライアントアドレス)
 				Map<Long, LinkedHashSet> timeBasedlog = new LinkedHashMap<Long, LinkedHashSet>();
 
 				// さらにクライアントアドレスごとに分類し、GTが使われている可能性があるかを判定する
@@ -238,10 +260,11 @@ public class AuthLogParser {
 					kerlog.put(ev.getClientAddress(), evSet);
 					this.logCnt++;
 				}
+				// GTが使われているか判定
 				isGoldenUsed(kerlog);
 
 				// 同じ時間帯のログごとに処理
-				list=new ArrayList <EventLogData>(evS);
+				list = new ArrayList<EventLogData>(evS);
 				Collections.reverse(list);
 				for (EventLogData ev : list) {
 					LinkedHashSet<EventLogData> evSet;
@@ -253,12 +276,14 @@ public class AuthLogParser {
 					evSet.add(ev);
 					timeBasedlog.put(ev.getTimeCnt(), evSet);
 				}
-				this.trainNum=Math.round(this.logCnt*this.TRAIN_PERCENTAGE);
-				//ファイルに出力する
+				// Calculate number of train data
+				// this.trainNum=Math.round(this.logCnt*this.TRAIN_PERCENTAGE);
+
+				// ファイルに出力する
 				outputLogs(timeBasedlog, accountName);
 				// time seriesログを出力する
 				outputTimeSeriseLogs(timeBasedlog, accountName);
-				//マージする
+				// マージする
 				mergeLogs(timeBasedlog, accountName);
 			}
 		} catch (IOException e) {
@@ -298,33 +323,33 @@ public class AuthLogParser {
 				// 4768が記録されていないのに、4769が記録されている
 				isGolden = 1;
 				for (EventLogData ev : evS) {
-					if(4769==ev.getEventID()) {
+					if (4769 == ev.getEventID()) {
 						ev.setIsGolden(isGolden);
 						this.logCnt--;
 					}
 				}
 			} else {
-			for (EventLogData ev : evS) {
-				if(5140==ev.getEventID()){
-					if(ev.getServiceName().contains("\\c$")){
-						isGolden = 1;
-						ev.setIsGolden(isGolden);
-						this.logCnt--;
+				for (EventLogData ev : evS) {
+					if (5140 == ev.getEventID()) {
+						if (ev.getServiceName().contains("\\c$")) {
+							isGolden = 1;
+							ev.setIsGolden(isGolden);
+							this.logCnt--;
+						}
+					} else if (4674 == ev.getEventID()) {
+						// 攻撃者がよく実行するコマンドを実行している
+						for (String cmd : suspiciousCmd) {
+							if (ev.getProcessName().contains(cmd)) {
+								isGolden = 1;
+								ev.setIsGolden(isGolden);
+								this.logCnt--;
+							}
+						}
 					}
-				} else if(4674==ev.getEventID()){
-					// 攻撃者がよく実行するコマンドを実行している
-				for (String cmd : SUSPICIOUS_CMD) {
-					if (ev.getProcessName().contains(cmd)) {
-						isGolden = 1;
-						ev.setIsGolden(isGolden);
-						this.logCnt--;
-					}
+					// 同じアカウント・端末・時間帯のログに同じtimeCntを割り当てる
+					long timeCnt = (ev.getAccountName() + ev.getClientAddress()).hashCode() + ev.getTimeCnt();
+					ev.settimeCnt(timeCnt);
 				}
-				}
-				// 同じアカウント・端末・時間帯のログに同じtimeCntを割り当てる
-				long timeCnt = (ev.getAccountName() + ev.getClientAddress()).hashCode() + ev.getTimeCnt();
-				ev.settimeCnt(timeCnt);
-			}
 			}
 		}
 
@@ -361,7 +386,7 @@ public class AuthLogParser {
 			int clientPort = 0;
 			String serviceName = "";
 			String processName = "";
-			short isGolden=0;
+			short isGolden = 0;
 			for (Iterator itTerm = map.entrySet().iterator(); itTerm.hasNext();) {
 				Map.Entry<String, LinkedHashSet> entryTerm = (Map.Entry<String, LinkedHashSet>) itTerm.next();
 				clientAddress = entryTerm.getKey();
@@ -371,97 +396,93 @@ public class AuthLogParser {
 					clientPort = clientPort += ev.getClientPort();
 					serviceName = serviceName += ev.getServiceName();
 					processName = processName += ev.getProcessName();
-					if(1==ev.isGolden()){
-						isGolden=ev.isGolden();
+					if (1 == ev.isGolden()) {
+						isGolden = ev.isGolden();
 					}
 				}
 				pw2.println(event + ", " + accountName + "," + clientAddress + ", " + clientPort + ", " + serviceName
-						+ ", " + processName+ ", " +isGolden );
+						+ ", " + processName + ", " + isGolden);
 			}
 		}
 
 	}
-	
+
 	private void outputLogs(Map<Long, LinkedHashSet> kerlog, String accountName) {
-		long timeCnt=0;
-		ArrayList <EventLogData> list=null;
+		long timeCnt = 0;
+		ArrayList<EventLogData> list = null;
 		for (Iterator it = kerlog.entrySet().iterator(); it.hasNext();) {
 			Map.Entry<Long, LinkedHashSet> entry = (Map.Entry<Long, LinkedHashSet>) it.next();
 			LinkedHashSet<EventLogData> evS = (LinkedHashSet<EventLogData>) entry.getValue();
-			String target="";
-			long logTime=0;
-				for (EventLogData ev : evS) {
-					try {
-						logTime = sdf.parse(ev.getDate()).getTime();
-					} catch (ParseException e1) {
-						e1.printStackTrace();
-					}
-					if(1==ev.isGolden()){
-						target="outlier";
-					} else if(logTime<this.attackStartTime){
-						//攻撃開始前は学習用データ
-						target="train";
-						currentTrainNum++;
-					} else{
-						target="test";
-					}
-					// UNIX Timeの計算
-					long time = 0;
-					try {
-						time = sdf.parse(ev.getDate()).getTime();
-					} catch (ParseException e) {
-						e.printStackTrace();
-					}
-					 pw.println(ev.getDate()+"," +time+"," + ev.getEventID() +
-							 "," + accountName + "," + ev.getClientAddress() +
-							 "," + ev.getServiceName() + ","
-							 + ev.getProcessName() + "," + ev.getTimeCnt() + "," + target);
+			String target = "";
+			long logTime = 0;
+			for (EventLogData ev : evS) {
+				try {
+					logTime = sdf.parse(ev.getDate()).getTime();
+				} catch (ParseException e1) {
+					e1.printStackTrace();
 				}
-				timeCnt=entry.getKey();
+				if (1 == ev.isGolden()) {
+					target = "outlier";
+				} else if (logTime < this.attackStartTime) {
+					// 攻撃開始前は学習用データ
+					target = "train";
+					// currentTrainNum++;
+				} else {
+					target = "test";
+				}
+				// UNIX Timeの計算
+				long time = 0;
+				try {
+					time = sdf.parse(ev.getDate()).getTime();
+				} catch (ParseException e) {
+					e.printStackTrace();
+				}
+				pw.println(ev.getDate() + "," + time + "," + ev.getEventID() + "," + accountName + ","
+						+ ev.getClientAddress() + "," + ev.getServiceName() + "," + ev.getProcessName() + ","
+						+ ev.getTimeCnt() + "," + target);
+			}
+			timeCnt = entry.getKey();
 		}
 
 	}
-	
+
 	private void outputTimeSeriseLogs(Map<Long, LinkedHashSet> kerlog, String accountName) {
-		long timeCnt=0;
-		ArrayList <EventLogData> list=null;
+		long timeCnt = 0;
+		ArrayList<EventLogData> list = null;
 		for (Iterator it = kerlog.entrySet().iterator(); it.hasNext();) {
 			Map.Entry<Long, LinkedHashSet> entry = (Map.Entry<Long, LinkedHashSet>) it.next();
 			LinkedHashSet<EventLogData> evS = (LinkedHashSet<EventLogData>) entry.getValue();
-			//list=new ArrayList <EventLogData>(evS);
-			//Collections.reverse(list);
-			String target="";
-			EventLogData prevEv=null;
-				for (EventLogData ev : evS) {
-					if(1==ev.isGolden()){
-						target="outlier";
-					} else if(currentTrainNum2<=trainNum || timeCnt==ev.getTimeCnt()){
-						target="train";
-						currentTrainNum2++;
-					} else{
-						target="test";
-					}
-					this.id++;
-					pw3.print(this.id+",");
-					if(null==prevEv){
-						 pw3.print("-,-,-,-,-");
-					} else{
-					 pw3.print(prevEv.getEventID() +"," + accountName + "," + prevEv.getClientAddress() +
-							 "," + prevEv.getServiceName() + ","+ prevEv.getProcessName() );
-					}
-					 pw3.println("," + ev.getEventID() +"," + accountName + "," + ev.getClientAddress() +
-							 "," + ev.getServiceName() + ","+ ev.getProcessName() 
-							 + "," + target);
-					 prevEv=new EventLogData(ev.getDate(),ev.getClientAddress(),accountName,ev.getEventID(),
-							 ev.getClientPort(),ev.getServiceName(),ev.getProcessName(),ev.getTimeCnt());
+			String target = "";
+			EventLogData prevEv = null;
+			for (EventLogData ev : evS) {
+				if (1 == ev.isGolden()) {
+					target = "outlier";
+				} else if (currentTrainNum2 <= trainNum || timeCnt == ev.getTimeCnt()) {
+					target = "train";
+					currentTrainNum2++;
+				} else {
+					target = "test";
 				}
-				timeCnt=entry.getKey();
+				this.id++;
+				pw3.print(this.id + ",");
+				if (null == prevEv) {
+					pw3.print("-,-,-,-,-");
+				} else {
+					pw3.print(prevEv.getEventID() + "," + accountName + "," + prevEv.getClientAddress() + ","
+							+ prevEv.getServiceName() + "," + prevEv.getProcessName());
+				}
+				pw3.println("," + ev.getEventID() + "," + accountName + "," + ev.getClientAddress() + ","
+						+ ev.getServiceName() + "," + ev.getProcessName() + "," + target);
+				prevEv = new EventLogData(ev.getDate(), ev.getClientAddress(), accountName, ev.getEventID(),
+						ev.getClientPort(), ev.getServiceName(), ev.getProcessName(), ev.getTimeCnt());
+			}
+			timeCnt = entry.getKey();
 		}
 	}
 
 	/**
-	 * Parse CSV files exported from Sysmon event log. Output process/loaded
-	 * DLLs and detect which matches Common DLL List.
+	 * Parse CSV files exported from event log. Detect possibility of attacks
+	 * using Golden Ticket
 	 * 
 	 * @param inputDirname
 	 */
@@ -476,11 +497,8 @@ public class AuthLogParser {
 			} else {
 				continue;
 			}
-
 			outputResults(log, this.outputDirName + "/" + "result.csv");
-
 		}
-
 	}
 
 	private void detelePrevFiles(String outDirname) {
@@ -496,22 +514,26 @@ public class AuthLogParser {
 
 	private static void printUseage() {
 		System.out.println("Useage");
-		System.out.println("{iputdirpath} {Common DLL List path} {outputdirpath} (-dr)");
-		System.out.println("If you evaluate detection rate using Common DLL Lists specify -dr option.)");
+		System.out.println("{iputdirpath} {outputdirpath} {suspicious command list file} ({date when attack starts})");
+		System.out.println("Date shold be specified 'yyyy/MM/dd HH:mm:ss' format.)");
 	}
-	
-	private  void createSuspiciousCmd(String inputdirname){
-		
-		File f = new File(inputdirname+"/command.txt");
-		SUSPICIOUS_CMD = new ArrayList<String>();
+
+	/**
+	 * Read suspicious command list
+	 * 
+	 * @param inputfilename
+	 */
+	private void readSuspiciousCmd(String inputfilename) {
+
+		File f = new File(inputfilename);
+		suspiciousCmd = new ArrayList<String>();
 		try {
 			BufferedReader br = new BufferedReader(new FileReader(f));
 			String line;
 			while ((line = br.readLine()) != null) {
-				SUSPICIOUS_CMD.add(line);
+				suspiciousCmd.add(line);
 			}
 		} catch (IOException e) {
-			// TODO Auto-generated catch block
 			e.printStackTrace();
 		}
 
@@ -520,19 +542,18 @@ public class AuthLogParser {
 	public static void main(String args[]) throws ParseException {
 		AuthLogParser sysmonParser = new AuthLogParser();
 		String inputdirname = "";
-		if (args.length < 2) {
+		String commandFile = "";
+		if (args.length < 3) {
 			printUseage();
-		} else if (args.length > 0) {
+		} else
 			inputdirname = args[0];
+		outputDirName = args[1];
+		commandFile = args[2];
+		if (args.length > 3) {
+			attackStartTime = sdf.parse(args[3]).getTime();
 		}
-		if (args.length > 1) {
-			outputDirName = args[1];
-		}
-		if (args.length > 2) {
-				attackStartTime = sdf.parse(args[2]).getTime();
-		}
-		log = new LinkedHashMap<String, LinkedHashSet>();
-		sysmonParser.createSuspiciousCmd(inputdirname);
+		log = new LinkedHashMap<String, LinkedHashSet<EventLogData>>();
+		sysmonParser.readSuspiciousCmd(commandFile);
 		sysmonParser.detelePrevFiles(outputDirName);
 		sysmonParser.detectGolden(inputdirname);
 	}
