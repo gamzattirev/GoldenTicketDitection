@@ -16,7 +16,7 @@ import java.util.*;
  */
 public class AuthLogParser {
 
-	//キーはアカウント名、値はEventLogDataオブジェクトのリスト。アカウント毎に分類するため
+	// キーはアカウント名、値はEventLogDataオブジェクトのリスト。アカウント毎に分類するため
 	private static Map<String, LinkedHashSet<EventLogData>> log;
 	private static String outputDirName = null;
 
@@ -66,7 +66,7 @@ public class AuthLogParser {
 			String serviceName = "";
 			String processName = "";
 			boolean isTargetEvent = false;
-			
+
 			// splitする際の上限回数
 			int limit = 0;
 
@@ -147,15 +147,15 @@ public class AuthLogParser {
 
 						} else if ((elem.contains("クライアント ポート:") || elem.contains("Client Port:")
 								|| elem.contains("ソース ポート:"))) {
-							try{ 
-							clientPort = Integer.parseInt(parseElement(elem, ":", limit));
-							} catch (NumberFormatException e){
+							try {
+								clientPort = Integer.parseInt(parseElement(elem, ":", limit));
+							} catch (NumberFormatException e) {
 								// nothing
 							}
 							evSet.add(new EventLogData(date, clientAddress, accountName, eventID, clientPort,
 									serviceName, processName, timeCnt));
-							if (5140!=eventID){
-								//  5140は共有名の情報を取得してから格納する
+							if (5140 != eventID) {
+								// 5140は共有名の情報を取得してから格納する
 								log.put(accountName, evSet);
 							}
 						} else if ((elem.contains("プロセス名:") || elem.contains("Process Name:"))) {
@@ -241,10 +241,10 @@ public class AuthLogParser {
 					continue;
 				}
 				LinkedHashSet<EventLogData> evS = (LinkedHashSet<EventLogData>) entry.getValue();
-				
+
 				// クライアントアドレス毎にログを保持するためのリスト(キー：クライアントアドレス)
 				Map<String, LinkedHashSet> kerlog = new LinkedHashMap<String, LinkedHashSet>();
-				
+
 				// 同じ時間帯毎にログを保持するためのリスト(キー：クライアントアドレス)
 				Map<Long, LinkedHashSet> timeBasedlog = new LinkedHashMap<Long, LinkedHashSet>();
 
@@ -279,11 +279,11 @@ public class AuthLogParser {
 				// Calculate number of train data
 				// this.trainNum=Math.round(this.logCnt*this.TRAIN_PERCENTAGE);
 
-				// ファイルに出力する
+				// 結果をファイルに出力する
 				outputLogs(timeBasedlog, accountName);
-				// time seriesログを出力する
+				// time series機械学習用のログを出力する
 				outputTimeSeriseLogs(timeBasedlog, accountName);
-				// マージする
+				// 同じ時間帯のログをマージする
 				mergeLogs(timeBasedlog, accountName);
 			}
 		} catch (IOException e) {
@@ -339,31 +339,30 @@ public class AuthLogParser {
 						this.logCnt--;
 					}
 				}
-				
-			} else {
-				for (EventLogData ev : evS) {
-					if (5140 == ev.getEventID()) {
-						// 管理共有が使用されている
-						if (ev.getServiceName().contains("\\c$")) {
+
+			}
+			for (EventLogData ev : evS) {
+				if (5140 == ev.getEventID()) {
+					// 管理共有が使用されている
+					if (ev.getServiceName().contains("\\c$")) {
+						isGolden = 1;
+						ev.setIsGolden(isGolden);
+						this.logCnt--;
+					}
+				} else if (4674 == ev.getEventID()) {
+					// 攻撃者がよく実行するコマンドを実行している
+					for (String cmd : suspiciousCmd) {
+						if (ev.getProcessName().contains(cmd)) {
 							isGolden = 1;
 							ev.setIsGolden(isGolden);
 							this.logCnt--;
 						}
-					} else if (4674 == ev.getEventID()) {
-						// 攻撃者がよく実行するコマンドを実行している
-						for (String cmd : suspiciousCmd) {
-							if (ev.getProcessName().contains(cmd)) {
-								isGolden = 1;
-								ev.setIsGolden(isGolden);
-								this.logCnt--;
-							}
-						}
 					}
-					// 同じアカウント・端末・時間帯のログに同じtimeCntを割り当てる
-					// アカウント・端末を連結させた文字列のハッシュコードとタイムカウントを加算する
-					long timeCnt = (ev.getAccountName() + ev.getClientAddress()).hashCode() + ev.getTimeCnt();
-					ev.settimeCnt(timeCnt);
 				}
+				// 同じアカウント・端末・時間帯のログに同じtimeCntを割り当てる
+				// アカウント・端末を連結させた文字列のハッシュコードとタイムカウントを加算する
+				long timeCnt = (ev.getAccountName() + ev.getClientAddress()).hashCode() + ev.getTimeCnt();
+				ev.settimeCnt(timeCnt);
 			}
 		}
 
@@ -422,7 +421,6 @@ public class AuthLogParser {
 	}
 
 	private void outputLogs(Map<Long, LinkedHashSet> kerlog, String accountName) {
-		long timeCnt = 0;
 		for (Iterator it = kerlog.entrySet().iterator(); it.hasNext();) {
 			Map.Entry<Long, LinkedHashSet> entry = (Map.Entry<Long, LinkedHashSet>) it.next();
 			LinkedHashSet<EventLogData> evS = (LinkedHashSet<EventLogData>) entry.getValue();
@@ -454,14 +452,12 @@ public class AuthLogParser {
 						+ ev.getClientAddress() + "," + ev.getServiceName() + "," + ev.getProcessName() + ","
 						+ ev.getTimeCnt() + "," + target);
 			}
-			timeCnt = entry.getKey();
 		}
 
 	}
 
 	private void outputTimeSeriseLogs(Map<Long, LinkedHashSet> kerlog, String accountName) {
 		long timeCnt = 0;
-		ArrayList<EventLogData> list = null;
 		for (Iterator it = kerlog.entrySet().iterator(); it.hasNext();) {
 			Map.Entry<Long, LinkedHashSet> entry = (Map.Entry<Long, LinkedHashSet>) it.next();
 			LinkedHashSet<EventLogData> evS = (LinkedHashSet<EventLogData>) entry.getValue();
