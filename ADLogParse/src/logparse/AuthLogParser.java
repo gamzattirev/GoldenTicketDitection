@@ -322,15 +322,28 @@ public class AuthLogParser {
 			if (!isTGTEvent && isSTEvent) {
 				// 4768が記録されていないのに、4769が記録されている
 				isGolden = 1;
+				long timeCnt;
+				Set<Long> attackTimeCnt = new HashSet<Long>();
 				for (EventLogData ev : evS) {
 					if (4769 == ev.getEventID()) {
 						ev.setIsGolden(isGolden);
 						this.logCnt--;
+						// 同じ時間帯のログを抽出する
+						attackTimeCnt.add(ev.getTimeCnt());
 					}
 				}
+				for (EventLogData ev : evS) {
+					if (attackTimeCnt.contains(ev.getTimeCnt())) {
+						// 同じ時間帯のログは攻撃によって記録された可能性が高い
+						ev.setIsGolden(isGolden);
+						this.logCnt--;
+					}
+				}
+				
 			} else {
 				for (EventLogData ev : evS) {
 					if (5140 == ev.getEventID()) {
+						// 管理共有が使用されている
 						if (ev.getServiceName().contains("\\c$")) {
 							isGolden = 1;
 							ev.setIsGolden(isGolden);
@@ -347,6 +360,7 @@ public class AuthLogParser {
 						}
 					}
 					// 同じアカウント・端末・時間帯のログに同じtimeCntを割り当てる
+					// アカウント・端末を連結させた文字列のハッシュコードとタイムカウントを加算する
 					long timeCnt = (ev.getAccountName() + ev.getClientAddress()).hashCode() + ev.getTimeCnt();
 					ev.settimeCnt(timeCnt);
 				}
@@ -409,7 +423,6 @@ public class AuthLogParser {
 
 	private void outputLogs(Map<Long, LinkedHashSet> kerlog, String accountName) {
 		long timeCnt = 0;
-		ArrayList<EventLogData> list = null;
 		for (Iterator it = kerlog.entrySet().iterator(); it.hasNext();) {
 			Map.Entry<Long, LinkedHashSet> entry = (Map.Entry<Long, LinkedHashSet>) it.next();
 			LinkedHashSet<EventLogData> evS = (LinkedHashSet<EventLogData>) entry.getValue();
@@ -424,10 +437,10 @@ public class AuthLogParser {
 				if (1 == ev.isGolden()) {
 					target = "outlier";
 				} else if (logTime < this.attackStartTime) {
-					// 攻撃開始前は学習用データ
+					// 攻撃開始前は学習用データとする
 					target = "train";
-					// currentTrainNum++;
 				} else {
+					// 攻撃開始前はテストデータとする
 					target = "test";
 				}
 				// UNIX Timeの計算
