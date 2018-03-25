@@ -47,6 +47,8 @@ public class AuthLogParser {
 	private long id = 0;
 	private static long attackStartTime = 0;
 	private int logCnt = 0;
+	private int eventNum=0;
+	private int detectedNum=0;
 
 	// Parameters for calculate number of train data(not used now)
 	// private static float TRAIN_PERCENTAGE=0.75f;
@@ -87,6 +89,7 @@ public class AuthLogParser {
 						if (line.contains("4769") || line.contains("4768") || line.contains("4674")
 								|| line.contains("4672") || line.contains("4624") || line.contains("5140")) {
 							// Event for investigation
+							eventNum++;
 							isTargetEvent = true;
 							try {
 								// Get date
@@ -110,7 +113,8 @@ public class AuthLogParser {
 							} catch (ParseException e) {
 								e.printStackTrace();
 							}
-
+						} else{
+							isTargetEvent = false;
 						}
 					} else if (isTargetEvent) {
 						if (elem.contains("アカウント名:") || elem.contains("Account Name:")) {
@@ -173,9 +177,12 @@ public class AuthLogParser {
 							log.put(accountName, evSet);
 							serviceName = "";
 						}
-					} else {
+					}
+					/*
+					else {
 						isTargetEvent = false;
 					}
+					*/
 				}
 			}
 			br.close();
@@ -231,16 +238,11 @@ public class AuthLogParser {
 					+ "eventID_c,account_c,ip_c,service_c,process_c,target");
 
 			ArrayList<EventLogData> list = null;
-
-			// アカウントごとに分類する
-			for (Iterator it = map.entrySet().iterator(); it.hasNext();) {
-				Map.Entry<String, LinkedHashSet> entry = (Map.Entry<String, LinkedHashSet>) it.next();
-				String accountName = (String) entry.getKey();
-				if (!accounts.contains(accountName)) {
-					// 特権を使っているアカウントのみ抽出
-					continue;
-				}
-				LinkedHashSet<EventLogData> evS = (LinkedHashSet<EventLogData>) entry.getValue();
+			
+			// アカウントごとに処理する
+			// 特権を使っているアカウントのみ抽出
+			for(String accountName :accounts) {
+				LinkedHashSet<EventLogData> evS = log.get(accountName);
 
 				// クライアントアドレス毎にログを保持するためのリスト(キー：クライアントアドレス)
 				Map<String, LinkedHashSet> kerlog = new LinkedHashMap<String, LinkedHashSet>();
@@ -309,8 +311,10 @@ public class AuthLogParser {
 			boolean isSTEvent = false;
 			short isGolden = 0;
 			Map.Entry<String, LinkedHashSet> entry = (Map.Entry<String, LinkedHashSet>) it.next();
+			//System.out.println(entry.getKey());
 			LinkedHashSet<EventLogData> evS = (LinkedHashSet<EventLogData>) entry.getValue();
 			for (EventLogData ev : evS) {
+				//System.out.println(ev.getAccountName());
 				int eventID = ev.getEventID();
 				// 4768/4769が記録されているかを調べる
 				if (eventID == 4768) {
@@ -328,6 +332,7 @@ public class AuthLogParser {
 					if (4769 == ev.getEventID()) {
 						ev.setIsGolden(isGolden);
 						this.logCnt--;
+						this.detectedNum++;
 						// 同じ時間帯のログを抽出する
 						attackTimeCnt.add(ev.getTimeCnt());
 					}
@@ -337,6 +342,7 @@ public class AuthLogParser {
 						// 同じ時間帯のログは攻撃によって記録された可能性が高い
 						ev.setIsGolden(isGolden);
 						this.logCnt--;
+						this.detectedNum++;
 					}
 				}
 
@@ -348,6 +354,7 @@ public class AuthLogParser {
 						isGolden = 1;
 						ev.setIsGolden(isGolden);
 						this.logCnt--;
+						this.detectedNum++;
 					}
 				} else if (4674 == ev.getEventID()) {
 					// 攻撃者がよく実行するコマンドを実行している
@@ -356,6 +363,7 @@ public class AuthLogParser {
 							isGolden = 1;
 							ev.setIsGolden(isGolden);
 							this.logCnt--;
+							this.detectedNum++;
 						}
 					}
 				}
@@ -506,8 +514,8 @@ public class AuthLogParser {
 			} else {
 				continue;
 			}
-			outputResults(log, this.outputDirName + "/" + "result.csv");
 		}
+		outputResults(log, this.outputDirName + "/" + "result.csv");
 	}
 
 	private void detelePrevFiles(String outDirname) {
@@ -547,6 +555,16 @@ public class AuthLogParser {
 		}
 
 	}
+	
+	private void outputDetectionRate(){
+		double truePositiveRate=(double)this.detectedNum/this.eventNum;
+		String truePositiveRateS = String.format("%.4f", truePositiveRate);
+		double trueNegativeRate=(double)(this.eventNum-this.detectedNum)/this.eventNum;
+		String trueNegativeRateS = String.format("%.4f", trueNegativeRate);
+		System.out.println("Total amount of events: "+this.eventNum);
+		System.out.println("True Positive counts: "+this.detectedNum);
+		System.out.println("True Negative counts: "+(this.eventNum-this.detectedNum));
+	}
 
 	public static void main(String args[]) throws ParseException {
 		AuthLogParser sysmonParser = new AuthLogParser();
@@ -565,6 +583,7 @@ public class AuthLogParser {
 		sysmonParser.readSuspiciousCmd(commandFile);
 		sysmonParser.detelePrevFiles(outputDirName);
 		sysmonParser.detectGolden(inputdirname);
+		sysmonParser.outputDetectionRate();
 	}
 
 }
