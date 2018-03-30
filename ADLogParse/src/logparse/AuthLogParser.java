@@ -87,7 +87,8 @@ public class AuthLogParser {
 						date = data[1];
 						eventID = Integer.parseInt(data[3]);
 						if (line.contains("4769") || line.contains("4768") || line.contains("4674")
-								|| line.contains("4672") || line.contains("4624") || line.contains("5140")) {
+								|| line.contains("4672") ||  line.contains("5140")
+								|| line.contains("4673")) {
 							// Event for investigation
 							eventNum++;
 							isTargetEvent = true;
