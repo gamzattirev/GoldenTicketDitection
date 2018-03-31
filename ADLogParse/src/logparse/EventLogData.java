@@ -1,5 +1,7 @@
 package logparse;
 
+import logparse.AuthLogParser.Alert;
+
 public class EventLogData {
 	
 	private String date="";
@@ -11,6 +13,7 @@ public class EventLogData {
 	private String processName = "";
 	private long timeCnt;
 	private short isGolden=0;
+	private Alert alertLevel;
 	
 	EventLogData(String date, String clientAddress, String accountName, int eventID, int clientPort, String serviceName, 
 			String processName,long timeCnt){
@@ -65,5 +68,11 @@ public class EventLogData {
 	}
 	public void settimeCnt(long timeCnt){
 		this.timeCnt=timeCnt;
+	}
+	public Alert getAlertLevel(){
+		return this.alertLevel;
+	}
+	public void setAlertLevel(Alert alertLevel){
+		this.alertLevel=alertLevel;
 	}
 }

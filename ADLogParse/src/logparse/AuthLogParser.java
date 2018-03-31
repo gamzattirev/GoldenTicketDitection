@@ -22,12 +22,25 @@ public class AuthLogParser {
 
 	// Initial value for timeCnt
 	private static short TIME_CNT = Short.MAX_VALUE;
+	
+	// Command execution rate for alert
+	private static double ALERT_SEVIRE=0.7;
+	private static double ALERT_WARNING=0.3;
+	// Alert Level
+	protected enum Alert{
+		SEVERE,
+		WARNING,
+		NOTICE,
+		NONE
+	}
 
 	// Suspicious command list
 	private List<String> suspiciousCmd = null;
 
 	// account name for detection(Domain Admin Privilege accounts)
 	private Set<String> accounts = new LinkedHashSet<String>();
+	
+	private int detecctTargetcmdCnt=0;
 
 	private FileWriter filewriter = null;
 	private BufferedWriter bw = null;
@@ -88,7 +101,7 @@ public class AuthLogParser {
 						eventID = Integer.parseInt(data[3]);
 						if (line.contains("4769") || line.contains("4768") || line.contains("4674")
 								|| line.contains("4672") ||  line.contains("5140")
-								|| line.contains("4673")) {
+								|| line.contains("4673") || line.contains("4688")) {
 							// Event for investigation
 							eventNum++;
 							isTargetEvent = true;
@@ -171,12 +184,12 @@ public class AuthLogParser {
 							log.put(accountName, evSet);
 							processName = "";
 						} else if (elem.contains("共有名:")) {
-							// カラムを増やしたくないので、サービス名に入れる
-							serviceName = parseElement(elem, ":", 2).toLowerCase();
+							// カラムを増やしたくないので、プロセス名に入れる
+							processName = parseElement(elem, ":", 2).toLowerCase();
 							evSet.add(new EventLogData(date, clientAddress, accountName, eventID, clientPort,
 									serviceName, processName, timeCnt));
 							log.put(accountName, evSet);
-							serviceName = "";
+							processName = "";
 						}
 					}
 					/*
@@ -221,7 +234,7 @@ public class AuthLogParser {
 			bw = new BufferedWriter(filewriter);
 			pw = new PrintWriter(bw);
 			// pw.println("date_utime,eventID,account,ip,port,service,process,timeCnt,target");
-			pw.println("date,date_utime,eventID,account,ip,service,process,timeCnt,target");
+			pw.println("date,date_utime,eventID,account,ip,service,process,timeCnt,target,alert");
 
 			// result of merged log based on timeCnt
 			filewriter2 = new FileWriter(outputDirName + "/" + "mergedlog.csv" + "", true);
@@ -285,9 +298,9 @@ public class AuthLogParser {
 				// 結果をファイルに出力する
 				outputLogs(timeBasedlog, accountName);
 				// time series機械学習用のログを出力する
-				outputTimeSeriseLogs(timeBasedlog, accountName);
+				//outputTimeSeriseLogs(timeBasedlog, accountName);
 				// 同じ時間帯のログをマージする
-				mergeLogs(timeBasedlog, accountName);
+				//mergeLogs(timeBasedlog, accountName);
 			}
 		} catch (IOException e) {
 			e.printStackTrace();
@@ -315,7 +328,6 @@ public class AuthLogParser {
 			//System.out.println(entry.getKey());
 			LinkedHashSet<EventLogData> evS = (LinkedHashSet<EventLogData>) entry.getValue();
 			for (EventLogData ev : evS) {
-				//System.out.println(ev.getAccountName());
 				int eventID = ev.getEventID();
 				// 4768/4769が記録されているかを調べる
 				if (eventID == 4768) {
@@ -338,6 +350,7 @@ public class AuthLogParser {
 						attackTimeCnt.add(ev.getTimeCnt());
 					}
 				}
+				
 				for (EventLogData ev : evS) {
 					if (attackTimeCnt.contains(ev.getTimeCnt())) {
 						// 同じ時間帯のログは攻撃によって記録された可能性が高い
@@ -346,18 +359,18 @@ public class AuthLogParser {
 						this.detectedNum++;
 					}
 				}
-
 			}
+			Set<String> commands = new LinkedHashSet<String>();
 			for (EventLogData ev : evS) {
 				if (5140 == ev.getEventID()) {
 					// 管理共有が使用されている
-					if (ev.getServiceName().contains("\\c$")) {
+					if (ev.getProcessName().contains("\\c$")) {
 						isGolden = 1;
 						ev.setIsGolden(isGolden);
 						this.logCnt--;
 						this.detectedNum++;
 					}
-				} else if (4674 == ev.getEventID()) {
+				} else if (4673 == ev.getEventID()||4674 == ev.getEventID()||4688 == ev.getEventID()) {
 					// 攻撃者がよく実行するコマンドを実行している
 					for (String cmd : suspiciousCmd) {
 						if (ev.getProcessName().contains(cmd)) {
@@ -365,6 +378,7 @@ public class AuthLogParser {
 							ev.setIsGolden(isGolden);
 							this.logCnt--;
 							this.detectedNum++;
+							commands.add(ev.getProcessName());
 						}
 					}
 				}
@@ -373,8 +387,21 @@ public class AuthLogParser {
 				long timeCnt = (ev.getAccountName() + ev.getClientAddress()).hashCode() + ev.getTimeCnt();
 				ev.settimeCnt(timeCnt);
 			}
+			// 実行された不審なコマンドの種類数
+			int detecctcmdCnt=commands.size();
+			double commandExecuterate=(double)detecctcmdCnt/this.detecctTargetcmdCnt;
+			Alert alertLevel=Alert.NONE;
+			if(commandExecuterate>this.ALERT_SEVIRE){
+				alertLevel=Alert.SEVERE;
+			} else if(commandExecuterate>this.ALERT_WARNING){
+				alertLevel=Alert.WARNING;
+			} else if(commandExecuterate>0){
+				alertLevel=Alert.NOTICE;
+			} 
+			for (EventLogData ev : evS) {
+				ev.setAlertLevel(alertLevel);
+			}
 		}
-
 	}
 
 	private void mergeLogs(Map<Long, LinkedHashSet> kerlog, String accountName) {
@@ -459,7 +486,7 @@ public class AuthLogParser {
 				}
 				pw.println(ev.getDate() + "," + time + "," + ev.getEventID() + "," + accountName + ","
 						+ ev.getClientAddress() + "," + ev.getServiceName() + "," + ev.getProcessName() + ","
-						+ ev.getTimeCnt() + "," + target);
+						+ ev.getTimeCnt() + "," + target+ "," + ev.getAlertLevel());
 			}
 		}
 
@@ -551,6 +578,7 @@ public class AuthLogParser {
 			while ((line = br.readLine()) != null) {
 				suspiciousCmd.add(line);
 			}
+			this.detecctTargetcmdCnt=this.suspiciousCmd.size();
 		} catch (IOException e) {
 			e.printStackTrace();
 		}
@@ -562,6 +590,7 @@ public class AuthLogParser {
 		String truePositiveRateS = String.format("%.4f", truePositiveRate);
 		double trueNegativeRate=(double)(this.eventNum-this.detectedNum)/this.eventNum;
 		String trueNegativeRateS = String.format("%.4f", trueNegativeRate);
+		
 		System.out.println("Total amount of events: "+this.eventNum);
 		System.out.println("True Positive counts: "+this.detectedNum);
 		System.out.println("True Negative counts: "+(this.eventNum-this.detectedNum));
